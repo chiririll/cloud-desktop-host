@@ -1,0 +1,6 @@
+[submodule "subprojects/wlroots"]
+	path = subprojects/wlroots
+	url = https://gitlab.freedesktop.org/wlroots/wlroots.git
+[submodule "subprojects/gamescope"]
+	path = subprojects/gamescope
+	url = https://github.com/ValveSoftware/gamescope.git

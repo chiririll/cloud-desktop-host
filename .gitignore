@@ -1,0 +1,44 @@
+# Meson / Ninja
+build/
+build-*/
+.meson-subproject-wrap-hash.txt
+
+# Meson wraps (если появятся — не коммитить бинарные кэши)
+subprojects/packagecache/
+
+# Сборка / артефакты
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+compile_commands.json
+
+# IDE / редакторы
+.vscode/
+.idea/
+.continue/
+.clinerules
+*.swp
+*~
+.clangd/
+
+# Локальные логи и временные файлы
+*.log
+.cache/
+
+# Python (если появятся скрипты)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Резервные копии исходников
+*.bak
+
+# Не коммитить вложенные .git внутри каталогов (субмодули задаются через .gitmodules)
+# Примечание: сами subprojects/wlroots и subprojects/gamescope — официальные git submodules.

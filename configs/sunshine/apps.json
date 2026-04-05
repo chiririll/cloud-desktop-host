@@ -1,0 +1,25 @@
+{
+  "env": {},
+  "apps": [
+    {
+      "name": "Desktop",
+      "image-path": "",
+      "prep-cmd": [
+        {
+          "do": "/home/user/cloud-desktop-host/scripts/sunshine-prep-desktop.sh",
+          "undo": "/home/user/cloud-desktop-host/scripts/sunshine-undo-desktop.sh"
+        }
+      ]
+    },
+    {
+      "name": "Steam Deck Mode",
+      "image-path": "",
+      "prep-cmd": [
+        {
+          "do": "/home/user/cloud-desktop-host/scripts/sunshine-prep-gamescope.sh",
+          "undo": "/home/user/cloud-desktop-host/scripts/sunshine-undo-gamescope.sh"
+        }
+      ]
+    }
+  ]
+}
