@@ -1,4 +1,4 @@
-# Субпроекты: wlroots и Gamescope
+# Субпроекты: wlroots, Gamescope и Sunshine
 
 GitHub **не имеет отдельного типа «Meson subproject»**. Стандартный способ сказать системе Git (и отобразить это на GitHub): **git submodule** — в основном репозитории хранится **запись на конкретный коммит** внешнего репозитория, а каталог в рабочем дереве — **отдельный клон** с собственным `.git` (в виде gitlink).
 
@@ -8,6 +8,15 @@ GitHub **не имеет отдельного типа «Meson subproject»**. �
 |-----------|--------------|------------------------------|
 | `subprojects/wlroots` | https://gitlab.freedesktop.org/wlroots/wlroots.git | **0.18.3** |
 | `subprojects/gamescope` | https://github.com/ValveSoftware/gamescope.git | **3.16.14.5** |
+| `subprojects/sunshine` | https://github.com/LizardByte/Sunshine.git | **v2026.403.124357** (см. `git submodule status`) |
+
+У **Sunshine** есть **свои** вложенные submodules (`third-party/*` и др.). После `git clone` обязательно:
+
+```bash
+git submodule update --init --recursive
+```
+
+Подробная пошаговая сборка всех трёх — [BUILD.md](BUILD.md).
 
 Файл [`.gitmodules`](../.gitmodules) задаёт URL и путь. Точный SHA коммита виден командой:
 
@@ -15,7 +24,7 @@ GitHub **не имеет отдельного типа «Meson subproject»**. �
 git submodule status
 ```
 
-На GitHub в интерфейсе коммита родительского репозитория строки `subprojects/wlroots` и `subprojects/gamescope` отображаются как **ссылки на коммит** во внешнем репозитории, а не как тысячи файлов в одном diff.
+На GitHub в интерфейсе коммита родительского репозитория каталоги `subprojects/wlroots`, `subprojects/gamescope` и `subprojects/sunshine` отображаются как **ссылки на коммит** во внешнем репозитории, а не как один плоский каталог без связи с upstream.
 
 ## Клонирование
 
@@ -43,7 +52,7 @@ git add subprojects/wlroots
 git commit -m "Bump wlroots to 0.18.3"
 ```
 
-Аналогично для Gamescope. После обновления **обязательно** пересоберите CDH и проверьте совместимость API wlroots.
+Аналогично для Gamescope и Sunshine. После обновления **обязательно** пересоберите CDH и проверьте совместимость API wlroots; для Sunshine выполните `git submodule update --init --recursive` внутри `subprojects/sunshine`.
 
 ## Альтернативы submodule (кратко)
 
@@ -71,3 +80,5 @@ git commit -m "Bump wlroots to 0.18.3"
 Корневой [`meson.build`](../meson.build) использует **только** `subproject('wlroots')` — то есть для сборки **cloud-desktop-host** обязателен checkout wlroots в `subprojects/wlroots`.
 
 **Gamescope** в Meson CDH **не** подключается: он нужен как отдельная программа для режима Steam Deck и собирается по инструкциям Valve (или ставится пакетом). Submodule Gamescope фиксирует **версию исходников**, с которой тестировался проект.
+
+**Sunshine** — отдельный сервис стриминга (**CMake + Ninja**, Node/npm, множество опций и вложенных submodules). Сборка описана в [BUILD.md](BUILD.md) и в upstream [`docs/building.md`](../subprojects/sunshine/docs/building.md). Submodule в CDH фиксирует версию для воспроизводимости; в продакшене Sunshine часто ставят из пакета дистрибутива.

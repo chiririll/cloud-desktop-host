@@ -4,3 +4,6 @@
 [submodule "subprojects/gamescope"]
 	path = subprojects/gamescope
 	url = https://github.com/ValveSoftware/gamescope.git
+[submodule "subprojects/sunshine"]
+	path = subprojects/sunshine
+	url = https://github.com/LizardByte/Sunshine.git

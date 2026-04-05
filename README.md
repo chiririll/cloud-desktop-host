@@ -19,7 +19,8 @@ Headless Wayland-композитор на **wlroots**, ядро стека **о
 | Документ | Содержание |
 |----------|------------|
 | [Архитектура CDH](docs/Архитектура%20cloud-desktop-host%20%28CDH%29.md) | Архитектура, протоколы, рендер-цикл, D-Bus, ограничения, стриминг и CUDA/NVENC |
-| [docs/COMPILATION.md](docs/COMPILATION.md) | Зависимости и сборка |
+| [docs/COMPILATION.md](docs/COMPILATION.md) | Зависимости и сборка CDH |
+| [docs/BUILD.md](docs/BUILD.md) | Сборка **всех** субмодулей: CDH, Gamescope, Sunshine |
 | [docs/INSTALL_AND_CONFIG.md](docs/INSTALL_AND_CONFIG.md) | Установка, Sunshine, Moonlight, пути и типичные сбои |
 | [docs/SUBPROJECTS.md](docs/SUBPROJECTS.md) | **Git submodules**: wlroots, Gamescope |
 
@@ -33,7 +34,9 @@ git clone --recurse-submodules https://github.com/wolfam0108/cloud-desktop-host.
 git submodule update --init --recursive
 ```
 
-Зафиксированные версии (см. `git submodule status`): **wlroots 0.18.3**, **Gamescope 3.16.14.5** (Valve).
+Зафиксированные версии (см. `git submodule status`): **wlroots 0.18.3**, **Gamescope 3.16.14.5** (Valve), **Sunshine** (LizardByte, тег вроде `v2026.*` — см. submodule).
+
+Подробная сборка **всех** субмодулей: [docs/BUILD.md](docs/BUILD.md) (CMake/Ninja для Sunshine, Meson для Gamescope, вложенные `git submodule` у Sunshine).
 
 ## Быстрый старт (сборка)
 
