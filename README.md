@@ -21,11 +21,11 @@ Headless Wayland-композитор на **wlroots**, ядро стека **о
 | [Архитектура CDH](docs/Архитектура%20cloud-desktop-host%20%28CDH%29.md) | Архитектура, протоколы, рендер-цикл, D-Bus, ограничения, стриминг и CUDA/NVENC |
 | [docs/BUILD.md](docs/BUILD.md) | Сборка: CDH, Gamescope, Sunshine, утилиты |
 | [docs/INSTALL_AND_CONFIG.md](docs/INSTALL_AND_CONFIG.md) | Установка, Sunshine, Moonlight, пути и типичные сбои |
-| [docs/SUBPROJECTS.md](docs/SUBPROJECTS.md) | **Git submodules**: wlroots, Gamescope |
+| [docs/SUBPROJECTS.md](docs/SUBPROJECTS.md) | **Git submodules**: wlroots, Gamescope, Sunshine |
 
 ## Субпроекты (GitHub)
 
-Каталоги `subprojects/wlroots` и `subprojects/gamescope` оформлены как **git submodule** — на GitHub они отображаются как ссылки на конкретные коммиты upstream, а не как «плоские» копии тысяч файлов в одном diff.
+Каталоги `subprojects/wlroots`, `subprojects/gamescope` и `subprojects/sunshine` оформлены как **git submodule** — на GitHub они отображаются как ссылки на конкретные коммиты upstream, а не как «плоские» копии тысяч файлов в одном diff.
 
 ```bash
 git clone --recurse-submodules https://github.com/wolfam0108/cloud-desktop-host.git
