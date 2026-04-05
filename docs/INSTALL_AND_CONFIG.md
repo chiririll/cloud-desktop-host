@@ -1,89 +1,592 @@
-# Установка и настройка cloud-desktop-host
+# Установка и настройка: cloud-desktop-host
 
-Цель: поднять стек **CDH → (KWin / Xwayland / Gamescope) → Sunshine → Moonlight** с согласованием разрешения и FPS.
+Стек: **PVE хост → LXC контейнер (Fedora) → CDH → Sunshine → Moonlight**
 
-Ниже — обобщённая схема; пути (`/home/user/...`, номер LXC) замените на свои.
+Документ разделён на две части:
+- **[Часть I](#часть-i--хост-proxmox-ve)** — хост Proxmox VE: NVIDIA-драйвер, создание LXC, `cgroup2`, маунты устройств.
+- **[Часть II](#часть-ii--lxc-контейнер-fedora)** — внутри контейнера: пакеты, сборка CDH, Sunshine, конфиги, скрипты запуска.
 
-## 1. Что должно быть установлено на хосте сессии
+Конфигурации взяты из реального окружения (контейнер **120 / fedora07**, GPU **RTX 3090**, драйвер **580.126.09**). Замените номер контейнера и имена устройств под своё железо.
 
-- Собранный **`cloud-desktop-host`** (см. [BUILD.md](BUILD.md))
-- **Sunshine** (см. [LizardByte/Sunshine](https://github.com/LizardByte/Sunshine))
-- Для режима **Desktop**: **KWin** (Wayland), **Plasma** (plasmashell и сопутствующие сервисы)
-- Для **Steam GamepadUI** (отдельный сценарий): **Xwayland**, Steam с флагами из [`scripts/run-steam.sh`](../scripts/run-steam.sh)
-- Для **Steam Deck Mode**: бинарник **gamescope** (nested), Steam с `-steamos3`, вспомогательные утилиты из `scripts/` и при необходимости **`gamescope-focus-daemon`**
-- **PipeWire** + **WirePlumber** (аудио для Sunshine)
-- Сессионный **D-Bus** (`DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR`)
+---
 
-## 2. Сокет Wayland и переменные окружения
+## Часть I — Хост (Proxmox VE)
 
-Композитор по умолчанию создаёт сокет **`wayland-cd`** в `$XDG_RUNTIME_DIR`.
+### I.1 Требования к хосту
 
-- Запуск Sunshine с захватом этого дисплея:  
-  `WAYLAND_DISPLAY=wayland-cd`
-- Скрипты в репозитории задают `XDG_RUNTIME_DIR`, `QT_*`, `XDG_CURRENT_DESKTOP` в зависимости от режима
+| Компонент | Требование |
+|-----------|------------|
+| **GPU** | NVIDIA с поддержкой NVENC (RTX / GTX серии 600+) |
+| **Драйвер NVIDIA на хосте** | Совпадать с версией в контейнере (580.126.09) |
+| **Ядро PVE** | ≥ 6.x (используется `cgroup2`) |
+| **Proxmox VE** | ≥ 8.0 |
+| **Приоритет IOMMU / VT-d** | Не требуется для LXC с биндом устройств |
 
-## 3. Настройка Sunshine
+> **Важно:** версия драйвера NVIDIA **на хосте** и **в контейнере** должны быть **одинаковыми**. Если они расходятся — NVIDIA-устройства в контейнере будут недоступны.
 
-### 3.1 Глобальная prep-команда (разрешение и FPS клиента)
+### I.2 Установка NVIDIA-драйвера на хост PVE
 
-Перед стартом стрима Sunshine может вызывать команду, которая:
+На хосте PVE Debian-based. Ставим драйвер без X11:
 
-1. Читает `SUNSHINE_CLIENT_WIDTH`, `SUNSHINE_CLIENT_HEIGHT`, `SUNSHINE_CLIENT_FPS`
-2. Вызывает D-Bus **`SetOutputMode`** на `org.gamescope.Input`
-3. При необходимости перезапускает элементы Plasma (`plasmashell --replace`)
+```bash
+# Добавить non-free репозиторий (если не добавлен)
+sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list
+echo "deb http://deb.debian.org/debian $(lsb_release -cs) main contrib non-free non-free-firmware" \
+  >> /etc/apt/sources.list.d/non-free.list
+apt-get update
 
-Референс: [`scripts/sunshine-prep-cmd.sh`](../scripts/sunshine-prep-cmd.sh).
+# Установить драйвер (без X11, только kernel module)
+apt-get install -y nvidia-driver nvidia-smi
 
-В веб-интерфейсе Sunshine укажите путь к этому скрипту (или обёртке) в настройках **Prep Commands** для **всех** приложений, если хотите единое поведение по FPS/разрешению.
+# Проверить
+nvidia-smi
+```
 
-### 3.2 Два профиля приложений (`apps`)
+Или через официальный runfile:
 
-Файл-пример: [`configs/sunshine/apps.json`](../configs/sunshine/apps.json).
+```bash
+# Скачать с developer.nvidia.com → «Linux 64-bit» → нужная версия
+chmod +x NVIDIA-Linux-x86_64-580.126.09.run
+./NVIDIA-Linux-x86_64-580.126.09.run --no-opengl-files --no-libglx-indirect
+```
 
-| `name` | Роль |
-|--------|------|
-| **Desktop** | Prep/undo для полного переключения в Plasma (KWin + стек) |
-| **Steam Deck Mode** | Prep/undo для Gamescope + Steam `-steamos3` |
+После установки:
 
-Скопируйте JSON в конфигурационный каталог Sunshine и поправьте **абсолютные пути** к скриптам (`/home/user/cloud-desktop-host/scripts/...`).
+```bash
+# Загрузить модули
+modprobe nvidia nvidia_uvm nvidia_modeset
 
-**Undo** важен: при отключении клиента Sunshine выполняет `undo`, чтобы убить лишние процессы и не оставлять висящий Gamescope/Plasma.
+# Проверить cgroup2 устройства:
+ls -la /dev/nvidia* /dev/nvidia-caps/ /dev/dri/
+```
 
-## 4. Moonlight на клиенте
+Фиксируем номера `major:minor` — они нужны для `lxc.cgroup2.devices.allow`:
 
-- Выберите в списке приложений **Desktop** или **Steam Deck Mode** (как задано в `apps.json`)
-- Задайте разрешение и частоту (например **1920×1080 @ 144 Hz** или **2560×1440 @ 144 Hz**, если сеть и энкодер вытягивают)
-- Включите аппаратный декод на стороне клиента (NVIDIA/Intel/AMD — в зависимости от платформы)
+```bash
+ls -la /dev/nvidia0 /dev/nvidiactl /dev/nvidia-modeset /dev/nvidia-uvm \
+        /dev/nvidia-uvm-tools /dev/dri/card2 /dev/dri/renderD128 \
+        /dev/input /dev/snd /dev/uinput /dev/nvidia-caps
+```
 
-После подключения Sunshine передаст размеры/FPS в prep-команды → **`SetOutputMode`** обновит режим виртуального output в CDH и цепочку presentation (см. раздел про refresh fixup в [архитектуре](Архитектура%20cloud-desktop-host%20%28CDH%29.md)).
+Пример (RTX 3090, хост из этого окружения):
 
-## 5. Запуск стека (референс)
+```
+crw-rw-rw- 1 root video  195,   0  /dev/nvidia0
+crw-rw-rw- 1 root video  195, 255  /dev/nvidiactl
+crw-rw-rw- 1 root video  195, 254  /dev/nvidia-modeset
+crw-rw-rw- 1 root video  235,   0  /dev/nvidia-uvm
+crw-rw-rw- 1 root video  235,   1  /dev/nvidia-uvm-tools
+crw-rw-rw- 1 root video  226,   2  /dev/dri/card2
+crw-rw-rw- 1 root video  226, 128  /dev/dri/renderD128
+```
 
-- **Быстрый тест без лишних логов:** [`scripts/run-nolog.sh`](../scripts/run-nolog.sh)  
-  Поднимает D-Bus, PipeWire, CDH, при наличии — Sunshine. Plasma/KWin обычно приходят с prep при подключении Moonlight (зависит от вашей конфигурации Sunshine).
+### I.3 Создание LXC контейнера
 
-- **Steam GamepadUI (Xwayland):** [`scripts/run-steam.sh`](../scripts/run-steam.sh)  
-  CDH с **`--no-auto-lock`**.
+В веб-интерфейсе Proxmox VE: **Create CT** → Fedora template, или через CLI:
 
-Убедитесь, что в скриптах путь **`HOST_BIN`** указывает на ваш собранный бинарник.
+```bash
+pct create 120 /var/lib/vz/template/cache/fedora-42-default_*.tar.zst \
+  --ostype fedora \
+  --arch amd64 \
+  --hostname fedora07 \
+  --cores 16 \
+  --memory 24000 \
+  --swap 1024 \
+  --rootfs local-zfs:64 \
+  --net0 name=eth0,bridge=vmbr0,ip=dhcp,ip6=dhcp,type=veth \
+  --features fuse=1,nesting=1
+```
 
-## 6. Настройка мыши (D-Bus / KCM Cloud Mouse)
+### I.4 Конфигурационный файл контейнера
 
-CDH публикует интерфейсы **org.gamescope.InputDeviceManager** и **org.gamescope.InputDevice** (см. архитектурный документ). Через них настраиваются:
+Полный конфиг — **`/etc/pve/lxc/120.conf`** (реальный конфиг этого окружения):
 
-- ускорение и профиль указателя;
-- **scrollFactor** (множитель скролла per-device);
-- natural scroll, эмуляция средней кнопки и др.
+```ini
+arch: amd64
+cores: 16
+features: fuse=1,nesting=1
+hostname: fedora07
+memory: 24000
+mp0: /bindfs/101,mp=/nas
+net0: name=eth0,bridge=vmbr0,hwaddr=BC:24:11:45:06:42,ip=dhcp,ip6=dhcp,type=veth
+ostype: fedora
+rootfs: local-zfs:subvol-120-disk-2,size=64G
+swap: 1024
 
-Настройки могут сохраняться в **`~/.config/gamescope-input.conf`**.
+# ── NVIDIA GPU ────────────────────────────────────────────────────
+# major 195 = nvidia0 / nvidiactl / nvidia-modeset
+lxc.cgroup2.devices.allow: c 195:* rwm
+# major 235 = nvidia-uvm / nvidia-uvm-tools
+lxc.cgroup2.devices.allow: c 235:* rwm
+# major 509 = nvidia-caps (cap1, cap2)
+lxc.cgroup2.devices.allow: c 509:* rwm
+# major 508 = nvidia-uvm-tools (может отличаться)
+lxc.cgroup2.devices.allow: c 508:* rwm
 
-## 7. Диагностика
+# major 226 = /dev/dri (DRM — нужен для GLES/EGL через Mesa)
+lxc.cgroup2.devices.allow: c 226:* rwm
 
-- Лог CDH: часто `/tmp/cdh.log` (как в `run-nolog.sh`)
-- Prep Sunshine: `/tmp/prep-cmd.log` (в `sunshine-prep-cmd.sh`)
-- Включите **`--hud`** на композиторе для оверлея FPS/commit rate (см. [`src/debug_ui.cpp`](../src/debug_ui.cpp))
-- **`--debug`** — подробные логи wlroots
+# ── Ввод ─────────────────────────────────────────────────────────
+# major 13 = /dev/input/* (libinput)
+lxc.cgroup2.devices.allow: c 13:* rwm
+# major 10, minor 223 = /dev/uinput (виртуальные устройства Sunshine)
+lxc.cgroup2.devices.allow: c 10:223 rwm
 
-## 8. NVIDIA / CUDA и Sunshine
+# ── Звук ─────────────────────────────────────────────────────────
+# major 116 = /dev/snd/* (ALSA)
+lxc.cgroup2.devices.allow: c 116:* rwm
 
-Кодирование видео выполняет **Sunshine** (типично **NVENC** на GPU NVIDIA, с опорой на драйвер и Video Codec SDK). CDH отвечает за **корректный Wayland-композитинг и тайминг**. Убедитесь, что драйвер NVIDIA, `nvidia-smi` и настройки Sunshine согласованы (разрешение, битрейт, кодек H.264/H.265/AV1 — по возможностям железа).
+# ── Маунты устройств в контейнер ─────────────────────────────────
+lxc.mount.entry: /dev/nvidia0           dev/nvidia0           none bind,optional,create=file
+lxc.mount.entry: /dev/nvidiactl         dev/nvidiactl         none bind,optional,create=file
+lxc.mount.entry: /dev/nvidia-modeset    dev/nvidia-modeset    none bind,optional,create=file
+lxc.mount.entry: /dev/nvidia-uvm        dev/nvidia-uvm        none bind,optional,create=file
+lxc.mount.entry: /dev/nvidia-uvm-tools  dev/nvidia-uvm-tools  none bind,optional,create=file
+lxc.mount.entry: /dev/dri/card2         dev/dri/card2         none bind,optional,create=file
+lxc.mount.entry: /dev/dri/renderD128    dev/dri/renderD128    none bind,optional,create=file
+lxc.mount.entry: /dev/input             dev/input             none bind,optional,create=dir
+lxc.mount.entry: /dev/snd               dev/snd               none bind,optional,create=dir
+lxc.mount.entry: tmpfs dev/shm tmpfs rw,nosuid,nodev,mode=1777,size=4G,create=dir 0 0
+lxc.mount.entry: /dev/uinput            dev/uinput            none bind,optional,create=file
+lxc.mount.entry: /dev/nvidia-caps       dev/nvidia-caps       none bind,optional,create=dir
+
+# ── Безопасность / sys ────────────────────────────────────────────
+# unconfined — без AppArmor ограничений (нужно для Wayland/libinput в LXC)
+lxc.apparmor.profile: unconfined
+# sys:rw — Wayland-compositor и wlroots требуют запись в /sys
+lxc.mount.auto: sys:rw
+```
+
+> **Примечание:** `/dev/dri/card2` — конкретная карта на этом хосте (RTX 3090). У вас может быть `/dev/dri/card0` или `card1`. Определите через `ls /dev/dri/` и сопоставьте с `nvidia-smi` (номер GPU = 0).
+
+Применить изменения в конфиге **без перезапуска**:
+
+```bash
+pct reboot 120
+```
+
+### I.5 Проброс /dev/input и uinput
+
+Sunshine создаёт виртуальные устройства (геймпад, мышь) через `/dev/uinput`. libinput в CDH читает реальный ввод через `/dev/input/*`. Оба нужны.
+
+На хосте убедитесь, что модуль `uinput` загружен:
+
+```bash
+modprobe uinput
+# Сделать автозагрузку:
+echo uinput >> /etc/modules-load.d/uinput.conf
+```
+
+---
+
+## Часть II — LXC контейнер (Fedora)
+
+Все команды ниже выполняются **внутри контейнера** (через `pct enter 120` или `pct exec 120 -- bash`).
+
+### II.1 Базовые пакеты
+
+```bash
+dnf update -y
+dnf install -y \
+  # Сборка CDH
+  meson ninja-build gcc gcc-c++ pkgconf-pkg-config \
+  wayland-devel wayland-protocols-devel mesa-libGLES-devel \
+  libinput-devel systemd-devel libdrm-devel mesa-libgbm-devel \
+  libxkbcommon-devel pixman-devel \
+  # Среда
+  dbus-daemon dbus-tools \
+  pipewire wireplumber pipewire-pulseaudio pipewire-utils \
+  xorg-x11-server-Xwayland \
+  # KDE Plasma
+  kwin plasma-desktop \
+  # Утилиты
+  busctl git wget curl
+```
+
+### II.2 NVIDIA-драйвер в контейнере
+
+> **Важно:** версия должна совпадать с версией на хосте PVE (в нашем случае **580.126.09**).
+
+Устанавливаем без ядерных модулей (они уже в хосте):
+
+```bash
+# Официальный runfile с флагом --no-kernel-module
+wget https://download.nvidia.com/XFree86/Linux-x86_64/580.126.09/NVIDIA-Linux-x86_64-580.126.09.run
+chmod +x NVIDIA-Linux-x86_64-580.126.09.run
+./NVIDIA-Linux-x86_64-580.126.09.run \
+  --no-kernel-module \
+  --no-opengl-files \
+  --no-libglx-indirect \
+  --install-compat32-libs \
+  -s
+
+# Проверить
+nvidia-smi
+```
+
+Или через dnf (если rpm-fusion настроен и версия совпадает):
+
+```bash
+dnf install -y akmod-nvidia xorg-x11-drv-nvidia-cuda
+```
+
+Проверка после установки:
+
+```bash
+nvidia-smi
+ls /dev/nvidia*
+# Ожидаемый вывод:
+# /dev/nvidia0  /dev/nvidiactl  /dev/nvidia-modeset  /dev/nvidia-uvm  /dev/nvidia-uvm-tools
+```
+
+### II.3 Создание пользователя
+
+CDH и стек Sunshine запускаются **от непривилегированного пользователя** `user`.
+
+```bash
+useradd -m -G input,video,render,audio user
+# Если нужен sudo:
+usermod -aG wheel user
+echo "%wheel ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/user
+```
+
+### II.4 Клонирование и сборка CDH
+
+```bash
+su - user
+cd /home/user
+
+git clone --recurse-submodules https://github.com/wolfam0108/cloud-desktop-host.git
+cd cloud-desktop-host
+git submodule update --init --recursive
+
+meson setup build
+ninja -C build
+
+# Проверить
+./build/cloud-desktop-host --help
+```
+
+Результат: `/home/user/cloud-desktop-host/build/cloud-desktop-host`
+
+### II.5 Сборка Gamescope (для Steam Deck Mode)
+
+```bash
+cd /home/user/cloud-desktop-host/subprojects/gamescope
+git submodule update --init --recursive
+
+# Зависимости Gamescope
+sudo dnf install -y vulkan-loader-devel libX11-devel libxcb-devel \
+  xorg-x11-proto-devel pipewire-devel
+
+meson setup build
+ninja -C build
+
+# Проверить
+./build/src/gamescope --version
+```
+
+Путь к бинарнику используется в prep-скрипте:
+`/home/user/cloud-desktop-host/subprojects/gamescope/build/src/gamescope`
+
+(задаётся в переменной `GAMESCOPE_BIN` в [`scripts/sunshine-prep-gamescope.sh`](../scripts/sunshine-prep-gamescope.sh))
+
+### II.6 Установка Sunshine
+
+Рекомендуется установить из **RPM** (собранный или официальный релиз).
+
+Скачать последний RPM из [releases LizardByte/Sunshine](https://github.com/LizardByte/Sunshine/releases):
+
+```bash
+# Пример (замените URL на актуальный)
+wget https://github.com/LizardByte/Sunshine/releases/download/v2026.403.124357/sunshine-fedora-42.rpm
+sudo dnf install -y ./sunshine-*.rpm
+```
+
+Или собрать из submodule — см. [docs/BUILD.md](BUILD.md), §4.
+
+Проверить:
+
+```bash
+sunshine --version
+which sunshine
+```
+
+После установки Sunshine создаёт сокет для веб-UI на порту **47990**.  
+Если запускается от user, добавить в группу:
+
+```bash
+sudo usermod -aG input video user
+```
+
+### II.7 Конфигурация Sunshine
+
+#### II.7.1 Глобальные настройки Sunshine
+
+Конфиг: `~/.config/sunshine/sunshine.conf`
+
+```ini
+# Захват через wlr_screencopy (Wayland — основной путь)
+capture = wlr
+
+# Кодировщик: NVENC (NVIDIA). Sunshine выберет автоматически при наличии GPU.
+encoder = nvenc
+
+# Логи
+log_level = info
+
+# Сеть
+port = 47989
+
+# Включить UPnP если нужно
+upnp = off
+
+# Путь к apps.json
+file_apps = /home/user/cloud-desktop-host/configs/sunshine/apps.json
+```
+
+Или через веб-интерфейс `https://localhost:47990`.
+
+#### II.7.2 Профили приложений
+
+Файл [`configs/sunshine/apps.json`](../configs/sunshine/apps.json) — **два профиля**:
+
+```json
+{
+  "env": {},
+  "apps": [
+    {
+      "name": "Desktop",
+      "image-path": "",
+      "prep-cmd": [
+        {
+          "do":   "/home/user/cloud-desktop-host/scripts/sunshine-prep-desktop.sh",
+          "undo": "/home/user/cloud-desktop-host/scripts/sunshine-undo-desktop.sh"
+        }
+      ]
+    },
+    {
+      "name": "Steam Deck Mode",
+      "image-path": "",
+      "prep-cmd": [
+        {
+          "do":   "/home/user/cloud-desktop-host/scripts/sunshine-prep-gamescope.sh",
+          "undo": "/home/user/cloud-desktop-host/scripts/sunshine-undo-gamescope.sh"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Скопировать в конфиг-каталог Sunshine:
+
+```bash
+mkdir -p ~/.config/sunshine
+cp /home/user/cloud-desktop-host/configs/sunshine/apps.json ~/.config/sunshine/apps.json
+```
+
+#### II.7.3 Права на скрипты
+
+```bash
+chmod +x /home/user/cloud-desktop-host/scripts/*.sh
+```
+
+---
+
+### II.8 Запуск стека
+
+#### II.8.1 Desktop Mode (Plasma + KWin)
+
+Основной скрипт: [`scripts/run.sh`](../scripts/run.sh)  
+Альтернатива (без логов): [`scripts/run-nolog.sh`](../scripts/run-nolog.sh)
+
+```bash
+su - user
+cd /home/user/cloud-desktop-host
+./scripts/run.sh
+```
+
+`run.sh` запускает в порядке:
+
+```
+1. D-Bus session
+2. PipeWire → WirePlumber → PipeWire-Pulse
+3. kactivitymanagerd (offscreen)
+4. cloud-desktop-host      → сокет wayland-cd
+5. KWin                    → сокет wayland-0 + Xwayland
+6. dbus-update-activation-environment
+7. kded6
+8. plasmashell + polkit
+9. Sunshine (WAYLAND_DISPLAY=wayland-cd)
+```
+
+Логи пишутся в `/tmp/cdhost-logs/`.
+
+#### II.8.2 Steam GamepadUI Mode
+
+Скрипт: [`scripts/run-steam.sh`](../scripts/run-steam.sh)
+
+```bash
+./scripts/run-steam.sh
+```
+
+Запускает CDH с `--no-auto-lock`, Xwayland fullscreen на `:0`, Steam с `-gamepadui`.
+
+---
+
+### II.9 Переключение режимов через Sunshine
+
+Когда Moonlight **подключается**, Sunshine автоматически вызывает prep-скрипт выбранного приложения, который:
+
+1. Вызывает D-Bus **`SetOutputMode(width, height, fps)`** → CDH адаптирует headless output.
+2. Запускает нужный стек (KWin+Plasma или Gamescope+Steam).
+
+Когда Moonlight **отключается**, выполняется undo-скрипт.
+
+#### Desktop — prep/undo
+
+| Событие | Скрипт | Действие |
+|---------|--------|----------|
+| Подключение | [`sunshine-prep-desktop.sh`](../scripts/sunshine-prep-desktop.sh) | Cleanup Gamescope → `SetOutputMode` → KWin (если нет) → Plasma stack |
+| Отключение | [`sunshine-undo-desktop.sh`](../scripts/sunshine-undo-desktop.sh) | Kill plasmashell, kded6, polkit |
+
+#### Steam Deck Mode — prep/undo
+
+| Событие | Скрипт | Действие |
+|---------|--------|----------|
+| Подключение | [`sunshine-prep-gamescope.sh`](../scripts/sunshine-prep-gamescope.sh) | Cleanup всего → `SetOutputMode` → Gamescope nested + Steam `-steamos3` |
+| Отключение | [`sunshine-undo-gamescope.sh`](../scripts/sunshine-undo-gamescope.sh) | Kill Steam, Gamescope, Xwayland, lock-файлы |
+
+#### Ручная смена разрешения через D-Bus
+
+```bash
+# Например: 2560×1440 @ 144 fps
+busctl --user call \
+  org.gamescope.Input \
+  /org/gamescope/Input \
+  org.gamescope.InputDeviceManager \
+  SetOutputMode uuu \
+  2560 1440 144
+```
+
+---
+
+### II.10 Настройка мыши (D-Bus / gamescope-input.conf)
+
+CDH публикует интерфейс **`org.gamescope.Input`** (совместим с **KCM Cloud Mouse**).
+
+#### Настройки через D-Bus вручную
+
+```bash
+# Просмотр устройств
+busctl --user get-property \
+  org.gamescope.Input /org/gamescope/Input \
+  org.gamescope.InputDeviceManager devicesSysNames
+
+# Настройка scrollFactor для устройства (замените <sysname> на имя из списка выше):
+busctl --user set-property \
+  org.gamescope.Input \
+  /org/gamescope/Input/Device/<sysname> \
+  org.gamescope.InputDevice scrollFactor d 8.0
+```
+
+#### Файл персистентных настроек
+
+`~/.config/gamescope-input.conf` — INI, секции по `sysname` устройства:
+
+```ini
+[event3]
+scrollFactor=8.0
+naturalScroll=false
+pointerAccelerationProfileFlat=false
+```
+
+---
+
+### II.11 autostart (systemd user-сервис)
+
+Запуск стека при старте контейнера от пользователя `user`:
+
+```ini
+# /home/user/.config/systemd/user/cloud-desktop.service
+[Unit]
+Description=cloud-desktop-host stack
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/user/cloud-desktop-host
+ExecStart=/home/user/cloud-desktop-host/scripts/run.sh
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+```
+
+Включить:
+
+```bash
+loginctl enable-linger user
+systemctl --user enable cloud-desktop.service
+systemctl --user start cloud-desktop.service
+systemctl --user status cloud-desktop.service
+```
+
+---
+
+### II.12 Moonlight на клиенте
+
+1. Скачать [Moonlight](https://moonlight-stream.org/).
+2. Добавить хост — IP контейнера (не хоста PVE) или IP хоста (порт 47989 Sunshine слушает в контейнере, а NAT/firewall должен пробрасывать).
+3. Выбрать приложение: **Desktop** или **Steam Deck Mode**.
+4. Задать разрешение и FPS (до 144 Hz). Sunshine передаст их в prep-скрипт → `SetOutputMode`.
+5. Включить аппаратный декод на стороне клиента (NVDEC / VAAPI / D3D11VA).
+
+---
+
+### II.13 Диагностика
+
+| Что проверять | Где смотреть |
+|---------------|-------------|
+| Лог CDH (Desktop) | `/tmp/cdhost-logs/compositor.log` или `/tmp/cdh.log` |
+| Лог CDH (Steam) | `/tmp/cdh-steam.log` |
+| Prep Desktop | `/tmp/prep-desktop.log` |
+| Prep Gamescope | `/tmp/prep-gamescope.log` |
+| Prep Cmd | `/tmp/prep-cmd.log` |
+| Gamescope | `/tmp/gamescope.log` |
+| Sunshine | `/tmp/cdhost-logs/sunshine.log` |
+| KWin | `/tmp/cdhost-logs/kwin.log` |
+| PipeWire | `/tmp/cdhost-logs/pipewire.log` |
+| HUD overlay | запустить CDH с `--hud` → оверлей FPS/commit rate в стриме |
+| Verbose wlroots | запустить CDH с `--debug` |
+
+Быстрая проверка, что CDH поднял сокет:
+
+```bash
+ls -la /run/user/$(id -u)/wayland-cd
+```
+
+Проверка D-Bus:
+
+```bash
+busctl --user list | grep gamescope
+```
+
+---
+
+### II.14 Типичные проблемы
+
+| Симптом | Причина | Решение |
+|---------|---------|---------|
+| `FAIL: no wayland-cd` | CDH не запустился | Проверить `/tmp/cdh.log`, права на устройства |
+| `busctl: service not found` | CDH не запустил D-Bus сервис | CDH должен быть запущен перед prep-скриптом |
+| Чёрный экран в Moonlight | KWin не подключился к CDH | `WAYLAND_DISPLAY=wayland-cd` в env KWin |
+| Нет звука | PipeWire не запустился или `/dev/snd` не примаплен | Проверить `lxc.mount.entry: /dev/snd` и `lxc.cgroup2.devices.allow: c 116:*` |
+| NVENC недоступен | Версии драйвера хоста/контейнера различаются | Установить одинаковые версии; проверить `nvidia-smi` в контейнере |
+| Gamescope не видит Wayland | `WAYLAND_DISPLAY` не задан | Задать `WAYLAND_DISPLAY=wayland-cd` перед запуском Gamescope |
+| MangoApp не отображается | GLFW выбирает Wayland backend | Задать `GLFW_PLATFORM=x11` (уже в `sunshine-prep-gamescope.sh`) |
+| Мышь не захватывается | `uinput` не доступен | `lxc.mount.entry: /dev/uinput` + `lxc.cgroup2.devices.allow: c 10:223 rwm` |
