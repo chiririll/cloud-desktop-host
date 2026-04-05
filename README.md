@@ -44,6 +44,23 @@ ninja -C build
 
 Подробности — в [docs/COMPILATION.md](docs/COMPILATION.md).
 
+## Публикация на GitHub
+
+Репозиторий уже инициализирован с **submodules**. После настройки доступа:
+
+```bash
+git remote add origin https://github.com/wolfam0108/cloud-desktop-host.git   # если ещё не добавлен
+git push -u origin main
+```
+
+При **HTTPS** Git запросит учётные данные; удобнее [SSH](https://docs.github.com/en/authentication/connecting-to-github-with-ssh) или [personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
+
+Клонирование у других:
+
+```bash
+git clone --recurse-submodules https://github.com/wolfam0108/cloud-desktop-host.git
+```
+
 ## Лицензии сторонних проектов
 
 - [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots) — MIT
