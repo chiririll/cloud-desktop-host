@@ -6,7 +6,7 @@
 
 ## 1. Что должно быть установлено на хосте сессии
 
-- Собранный **`cloud-desktop-host`** (см. [COMPILATION.md](COMPILATION.md))
+- Собранный **`cloud-desktop-host`** (см. [BUILD.md](BUILD.md))
 - **Sunshine** (см. [LizardByte/Sunshine](https://github.com/LizardByte/Sunshine))
 - Для режима **Desktop**: **KWin** (Wayland), **Plasma** (plasmashell и сопутствующие сервисы)
 - Для **Steam GamepadUI** (отдельный сценарий): **Xwayland**, Steam с флагами из [`scripts/run-steam.sh`](../scripts/run-steam.sh)

@@ -443,6 +443,8 @@ X11 daemon, эмулирующий подмножество `steamcompmgr` дл�
 
 ### Сборка
 
+Единый документ по зависимостям, Meson, Gamescope и Sunshine: [BUILD.md](BUILD.md).
+
 ```bash
 # На хосте — правка исходников:
 vim /root/cloud-desktop-host/src/output.cpp
