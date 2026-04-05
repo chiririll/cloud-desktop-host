@@ -1,6 +1,7 @@
 # Сборка всех субмодулей (CDH, wlroots, Gamescope, Sunshine)
 
 Единый гайд по сборке компонентов из [`subprojects/`](../subprojects/).  
+Если у вас есть локальный `BUILD.md` с другого компьютера (например с `D:\Download\BUILD.md`), можно **сверить** шаги и перенести оттуда дистрибутив-специфичные детали — в репозиторий включена обобщённая версия по upstream-докам.  
 Официальные первоисточники:
 
 - Sunshine: [документация LizardByte](https://docs.lizardbyte.dev/projects/sunshine/latest/), в submodule — [`subprojects/sunshine/docs/building.md`](../subprojects/sunshine/docs/building.md), [`scripts/linux_build.sh`](../subprojects/sunshine/scripts/linux_build.sh), [`cmake/prep/options.cmake`](../subprojects/sunshine/cmake/prep/options.cmake).
