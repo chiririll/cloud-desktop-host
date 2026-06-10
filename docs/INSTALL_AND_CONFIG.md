@@ -155,15 +155,37 @@ lxc.mount.entry: /dev/nvidia-caps       dev/nvidia-caps       none bind,optional
 lxc.apparmor.profile: unconfined
 # sys:rw — Wayland-compositor и wlroots требуют запись в /sys
 lxc.mount.auto: sys:rw
+
+# ── Capabilities (обязательно для KWin) ───────────────────────────
+# lxc-pve 7.0+ по умолчанию вырезает sys_nice из capability bounding set
+# контейнера (в /usr/share/lxc/config/fedora.common.conf). Но бинарник
+# kwin_wayland несёт file capability cap_sys_nice=ep (с effective-битом, её
+# ставит сам RPM пакета kwin). Без sys_nice в bounding set ядро отказывает
+# в exec с EPERM → KWin не стартует → Desktop-режим отдаёт только цветные
+# переливы (заглушка CDH при отсутствии desktop_surface).
+# Решение: сбросить дефолтный drop-лист и передать его БЕЗ sys_nice.
+lxc.cap.drop:
+lxc.cap.drop: mac_admin mac_override setfcap sys_module sys_pacct sys_rawio sys_time
 ```
 
 > **Примечание:** `/dev/dri/card2` — конкретная карта на этом хосте (RTX 3090). У вас может быть `/dev/dri/card0` или `card1`. Определите через `ls /dev/dri/` и сопоставьте с `nvidia-smi` (номер GPU = 0).
 
-Применить изменения в конфиге **без перезапуска**:
+Применить изменения в конфиге:
 
 ```bash
 pct reboot 120
 ```
+
+> **Важно (capability `sys_nice`):** блок `lxc.cap.drop` выше — не косметика. Capability bounding set применяется **только при старте контейнера**, поэтому после правки нужен именно `pct stop 120 && pct start 120` (или `pct reboot 120`), а не «на лету». Без этого override после `lxc-pve 7.0+` `kwin_wayland` не запускается (EPERM), и Desktop-режим показывает только цветные переливы. Проверка после рестарта:
+>
+> ```bash
+> # sys_nice должен присутствовать в bounding set:
+> pct exec 120 -- bash -lc 'B=$(awk "/CapBnd/{print \$2}" /proc/1/status); capsh --decode=0x$B | tr "," "\n" | grep sys_nice'
+> # kwin_wayland должен исполняться (печатать версию, а не "Operation not permitted"):
+> pct exec 120 -- runuser -u user -- kwin_wayland --version
+> ```
+>
+> Почему так: это привилегированный LXC, и фикс живёт в host-конфиге `120.conf`, которого `dnf` внутри контейнера не касается — значит он **переживает обновления** kwin и пакетов без всяких хуков. Править метку на бинарнике (`setcap -r`) бесполезно: её вернёт первый же `dnf upgrade kwin`.
 
 ### I.5 Проброс /dev/input и uinput
 
@@ -585,6 +607,7 @@ busctl --user list | grep gamescope
 | `FAIL: no wayland-cd` | CDH не запустился | Проверить `/tmp/cdh.log`, права на устройства |
 | `busctl: service not found` | CDH не запустил D-Bus сервис | CDH должен быть запущен перед prep-скриптом |
 | Чёрный экран в Moonlight | KWin не подключился к CDH | `WAYLAND_DISPLAY=wayland-cd` в env KWin |
+| Desktop: цветные переливы (RGB-анимация) вместо рабочего стола | `kwin_wayland` не стартует (EPERM): метка `cap_sys_nice=ep`, а `sys_nice` вырезан из bounding set контейнера (дефолт `lxc-pve 7.0+`). В `/tmp/prep-desktop.log` видно `DISPLAY=N/A` и падение Plasma | Вернуть `sys_nice` в bounding set — override `lxc.cap.drop` в `/etc/pve/lxc/120.conf` (см. §I.4), затем `pct stop 120 && pct start 120` |
 | Нет звука | PipeWire не запустился или `/dev/snd` не примаплен | Проверить `lxc.mount.entry: /dev/snd` и `lxc.cgroup2.devices.allow: c 116:*` |
 | NVENC недоступен | Версии драйвера хоста/контейнера различаются | Установить одинаковые версии; проверить `nvidia-smi` в контейнере |
 | Gamescope не видит Wayland | `WAYLAND_DISPLAY` не задан | Задать `WAYLAND_DISPLAY=wayland-cd` перед запуском Gamescope |
