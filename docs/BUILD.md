@@ -17,7 +17,7 @@
 ## 1. Клонирование и обновление submodules
 
 ```bash
-git clone --recurse-submodules https://github.com/wolfam0108/cloud-desktop-host.git
+git clone --recurse-submodules https://github.com/wolfram0108/cloud-desktop-host.git
 cd cloud-desktop-host
 ```
 

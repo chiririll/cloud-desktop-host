@@ -154,7 +154,7 @@ cloud-desktop-host/
 
 ```bash
 # Клонировать со всеми субмодулями
-git clone --recurse-submodules https://github.com/wolfam0108/cloud-desktop-host.git
+git clone --recurse-submodules https://github.com/wolfram0108/cloud-desktop-host.git
 cd cloud-desktop-host
 
 # Собрать CDH (wlroots компилируется как subproject)

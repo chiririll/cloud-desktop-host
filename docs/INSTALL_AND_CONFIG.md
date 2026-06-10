@@ -278,7 +278,7 @@ echo "%wheel ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/user
 su - user
 cd /home/user
 
-git clone --recurse-submodules https://github.com/wolfam0108/cloud-desktop-host.git
+git clone --recurse-submodules https://github.com/wolfram0108/cloud-desktop-host.git
 cd cloud-desktop-host
 git submodule update --init --recursive
 
