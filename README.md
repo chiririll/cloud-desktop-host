@@ -142,6 +142,7 @@ cloud-desktop-host/
 
 | Документ | Что внутри |
 |----------|-----------|
+| [Архитектура приложения](docs/APP_ARCHITECTURE.md) | Верхнеуровневая архитектура: контекст, компоненты, runtime-сценарии, потоки данных, границы ответственности |
 | [Архитектура CDH](docs/Архитектура%20cloud-desktop-host%20%28CDH%29.md) | Детальное описание всех модулей, протоколов, рендер-цикла, потоков данных, ключевых решений |
 | [docs/BUILD.md](docs/BUILD.md) | Сборка CDH, Gamescope и Sunshine (CMake/Meson, CUDA, Node/npm) |
 | [docs/INSTALL_AND_CONFIG.md](docs/INSTALL_AND_CONFIG.md) | Установка: хост PVE (LXC conf, NVIDIA, cgroup2) и контейнер (Fedora, Sunshine, скрипты) |
