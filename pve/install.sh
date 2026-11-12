@@ -45,7 +45,9 @@ CDH_GH_REPO=${CDH_GH_REPO:-chiririll/cloud-desktop-host}
 CDH_VERSION=${CDH_VERSION:-}
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/.." && pwd)
 CDH_BIN=$REPO/dist/cloud-desktop-host
-SUNSHINE_RPM=${SUNSHINE_RPM:-https://github.com/LizardByte/Sunshine/releases/latest/download/sunshine-fedora-${FEDORA}-amd64.rpm}
+# empty = resolve the latest LizardByte release's fc$FEDORA asset at install time
+# (asset names embed the version, so /releases/latest/download/<name> can't be used)
+SUNSHINE_RPM=${SUNSHINE_RPM:-}
 CT_CDH=/opt/cloud-desktop-host   # scripts + configs, root-owned, read-only for the user
 LOG=/var/log/cdh-lxc-install.log
 
@@ -441,7 +443,17 @@ step "CDH scripts + configs in $CT_CDH" chk_scripts do_scripts
 
 # LizardByte's RPM is named "Sunshine" (capital S): match case-insensitively
 chk_sunshine() { ct_sh 'rpm -qa --qf "%{NAME}\n" | grep -qix sunshine' || why "Sunshine RPM not installed"; }
+latest_sunshine_rpm() {
+  curl -fsSL https://api.github.com/repos/LizardByte/Sunshine/releases/latest \
+    | grep -o '"browser_download_url": *"[^"]*\.fc'"$FEDORA"'\.x86_64\.rpm"' \
+    | head -1 | sed 's/.*"\(https:[^"]*\)"/\1/'
+}
 do_sunshine() {
+  if [[ -z $SUNSHINE_RPM ]]; then
+    SUNSHINE_RPM=$(latest_sunshine_rpm)
+    [[ -n $SUNSHINE_RPM ]] || { echo "no fc$FEDORA x86_64 RPM in latest Sunshine release"; return 1; }
+    echo "Sunshine: $SUNSHINE_RPM"
+  fi
   if [[ -f $SUNSHINE_RPM ]]; then
     pct push "$CTID" "$SUNSHINE_RPM" /tmp/sunshine.rpm
     ct dnf install -y /tmp/sunshine.rpm || true   # postinst modprobe/udevadm fail in a CT
