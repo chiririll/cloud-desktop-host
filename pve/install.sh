@@ -12,23 +12,27 @@
 # Every step: check → (apply if needed) → check again. Safe to re-run any time,
 # e.g. after a host driver update or when /dev/dri/cardN got renumbered.
 #
-# Settings (env vars):
-#   CTID=180  CT_HOSTNAME=gaming  CT_STORAGE=local-lvm  CT_DISK=64  CT_CORES=8
-#   CT_MEMORY=16384  CT_BRIDGE=vmbr0  TEMPLATE_STORAGE=local  FEDORA=43
-#   CT_USER=user  INSTALL_STEAM=1  SHM_SIZE=4G
+# The container ID is asked interactively (or set CTID=… for unattended runs).
+# Creation settings are asked only when a new CT is about to be created.
+#
+# Settings (env vars, all optional when run interactively):
+#   CTID  CT_HOSTNAME  CT_STORAGE  CT_DISK  CT_CORES  CT_MEMORY  CT_BRIDGE
+#   TEMPLATE_STORAGE=local  FEDORA=43  CT_USER=user  INSTALL_STEAM=1  SHM_SIZE=4G
+#   YES=1   don't ask for confirmation before changing an existing CT
 #   NVIDIA_PCI=0000:01:00.0   pick the GPU if there are several NVIDIA cards
-#   CDH_VERSION=v0.1.0   use this release (default: local dist/, else latest)
+#   CDH_VERSION=v1.0.0   use this release (default: local dist/, else latest)
 #   CDH_GH_REPO=chiririll/cloud-desktop-host   SUNSHINE_RPM=<url or local .rpm>
 #   CSRF_EXTRA=https://gaming.example.org   extra Sunshine web UI origins
 set -euo pipefail
 
-CTID=${CTID:-180}
-CT_HOSTNAME=${CT_HOSTNAME:-gaming}
-CT_STORAGE=${CT_STORAGE:-local-lvm}
-CT_DISK=${CT_DISK:-64}
-CT_CORES=${CT_CORES:-8}
-CT_MEMORY=${CT_MEMORY:-16384}
-CT_BRIDGE=${CT_BRIDGE:-vmbr0}
+CTID=${CTID:-}
+CT_HOSTNAME=${CT_HOSTNAME:-}
+CT_STORAGE=${CT_STORAGE:-}
+CT_DISK=${CT_DISK:-}
+CT_CORES=${CT_CORES:-}
+CT_MEMORY=${CT_MEMORY:-}
+CT_BRIDGE=${CT_BRIDGE:-}
+YES=${YES:-0}
 TEMPLATE_STORAGE=${TEMPLATE_STORAGE:-local}
 FEDORA=${FEDORA:-43}
 CT_USER=${CT_USER:-user}
@@ -44,7 +48,6 @@ CDH_BIN=$REPO/dist/cloud-desktop-host
 SUNSHINE_RPM=${SUNSHINE_RPM:-https://github.com/LizardByte/Sunshine/releases/latest/download/sunshine-fedora-${FEDORA}-amd64.rpm}
 CT_HOME=/home/$CT_USER
 CT_CDH=$CT_HOME/cloud-desktop-host
-CONF=/etc/pve/lxc/$CTID.conf
 LOG=/var/log/cdh-lxc-install.log
 
 CT_PACKAGES=(dbus-daemon dbus-tools dbus-x11 pipewire wireplumber pipewire-pulseaudio
@@ -69,29 +72,67 @@ msg_warn() { printf '\r\e[K %s!%s %s\n' "$YW" "$CL" "$1"; }
 die()      { printf '\r\e[K %s✘%s %s\n' "$RD" "$CL" "$1"; exit 1; }
 header()   { printf '\n%s── %s%s\n' "$BL" "$1" "$CL"; }
 
+# ── prompts (read from /dev/tty so `bash -c "$(curl …)"` works too) ──
+have_tty() { { : </dev/tty; } 2>/dev/null; }
+# ask VAR "question" default [regex]: keeps VAR if already set (env)
+ask() {
+  local var=$1 q=$2 def=$3 re=${4:-.} ans
+  [[ -n ${!var} ]] && return 0
+  if ! have_tty; then printf -v "$var" '%s' "$def"; return 0; fi
+  while :; do
+    read -rp " ${BL}?${CL} $q [${def}]: " ans </dev/tty || exit 1
+    ans=${ans:-$def}
+    [[ $ans =~ $re ]] && break
+    echo "   invalid value"
+  done
+  printf -v "$var" '%s' "$ans"
+}
+confirm() { # confirm "question" → 0 if yes
+  local ans
+  ((YES)) && return 0
+  have_tty || return 0
+  read -rp " ${YW}?${CL} $1 [y/N]: " ans </dev/tty || exit 1
+  [[ $ans =~ ^[Yy] ]]
+}
+
 NEEDED=0
 RESTART_CT=0
 APPLIED=0   # set by step() when it changed something
 # step "description" check_fn apply_fn
+# Checks print WHY they fail (one reason per line); shown under "needed".
+why()  { echo "$*"; return 1; }
+show_why() { [[ -n $1 ]] && sed -n '1,8p' <<<"$1" | sed "s/^/     $DM/; s/\$/$CL/"; return 0; }
+
 step() {
-  local name=$1 check=$2 apply=$3 rc
+  local name=$1 check=$2 apply=$3 rc out
   APPLIED=0
-  if $check >/dev/null 2>&1; then msg_ok "$name"; return 0; fi
-  if ((CHECK_ONLY)); then msg_todo "$name"; NEEDED=$((NEEDED + 1)); return 0; fi
+  if out=$($check 2>&1); then msg_ok "$name"; return 0; fi
+  if ((CHECK_ONLY)); then msg_todo "$name"; show_why "$out"; NEEDED=$((NEEDED + 1)); return 0; fi
   msg_info "$name"
-  echo "=== $(date -Is) $name" >>"$LOG"
+  printf '=== %s %s\n%s\n' "$(date -Is)" "$name" "$out" >>"$LOG"
   set +e; ( set -e; $apply ) >>"$LOG" 2>&1; rc=$?; set -e
   ((rc == 0)) || die "$name: failed (exit $rc), see $LOG"
-  $check >/dev/null 2>&1 || die "$name: still not satisfied after applying, see $LOG"
+  if ! out=$($check 2>&1); then
+    printf '\r\e[K'; show_why "$out"; die "$name: still not satisfied after applying, see $LOG"
+  fi
   APPLIED=1
   msg_ok "$name" "done"
 }
 # check-only step: nothing we can safely automate
 require() {
-  local name=$1 check=$2 hint=$3
-  $check >/dev/null 2>&1 && { msg_ok "$name"; return 0; }
-  ((CHECK_ONLY)) && { msg_todo "$name: $hint"; NEEDED=$((NEEDED + 1)); return 0; }
-  die "$name: $hint"
+  local name=$1 check=$2 hint=$3 out
+  out=$($check 2>&1) && { msg_ok "$name"; return 0; }
+  ((CHECK_ONLY)) && { msg_todo "$name: $hint"; show_why "$out"; NEEDED=$((NEEDED + 1)); return 0; }
+  show_why "$out"; die "$name: $hint"
+}
+# rpm_missing pkg… → prints missing package names, fails if any
+rpm_missing() {
+  local out rc=0 m
+  out=$(ct rpm -q "$@" 2>&1) || rc=$?
+  ((rc == 0)) && return 0
+  m=$(awk '/is not installed/{print $2}' <<<"$out" | xargs)
+  [[ -n $m ]] && { why "missing: $m"; return; }
+  why "rpm -q failed: $(head -1 <<<"$out")"
 }
 
 ct()      { pct exec "$CTID" -- "$@"; }
@@ -120,15 +161,29 @@ nvidia_minor() { # /dev/nvidiaN of the chosen GPU
 host_driver() { cat /sys/module/nvidia/version 2>/dev/null; }
 
 # ── release bundle: cdh/{cloud-desktop-host,scripts,configs,pve} ──
+# MANIFEST: "sha256  path" for cloud-desktop-host, scripts/*, configs/*.
+# --check only needs this (a few KB), the bundle is downloaded to apply.
+MANIFEST=''
+release_base() {
+  if [[ -z $CDH_VERSION || $CDH_VERSION == latest ]]; then
+    echo "https://github.com/$CDH_GH_REPO/releases/latest/download"
+  else
+    echo "https://github.com/$CDH_GH_REPO/releases/download/$CDH_VERSION"
+  fi
+}
+fetch_manifest() {
+  MANIFEST=$(curl -fsSL "$(release_base)/MANIFEST-fc$FEDORA") && [[ -n $MANIFEST ]]
+}
+local_manifest() {
+  printf '%s  cloud-desktop-host\n' "$(sha256sum <"$CDH_BIN" | cut -d' ' -f1)"
+  (cd "$REPO" && find scripts configs -type f | sort | xargs sha256sum)
+}
 fetch_release() {
   local asset="cdh-fc$FEDORA-x86_64.tar.gz" base tmp
-  if [[ -z $CDH_VERSION || $CDH_VERSION == latest ]]; then
-    base="https://github.com/$CDH_GH_REPO/releases/latest/download"
-  else
-    base="https://github.com/$CDH_GH_REPO/releases/download/$CDH_VERSION"
-  fi
+  base=$(release_base)
   tmp=$(mktemp -d /tmp/cdh-release.XXXXXX)
-  trap "rm -rf '$tmp'" EXIT   # expand now: tmp is local
+  # shellcheck disable=SC2064  # expand now on purpose: tmp is local
+  trap "rm -rf '$tmp'" EXIT
   curl -fsSL -o "$tmp/$asset" "$base/$asset" || return 1
   curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" || return 1
   (cd "$tmp" && grep " $asset\$" SHA256SUMS | sha256sum -c --quiet -) || return 1
@@ -141,12 +196,50 @@ fetch_release() {
 command -v pct >/dev/null || die "pct not found: this must run on a Proxmox VE host"
 ((CHECK_ONLY)) && echo "${YW}check mode: nothing will be changed${CL}"
 
+# ── which container ──
+if [[ -z $CTID ]]; then
+  have_tty || die "no terminal to ask on: set CTID=<id> (and optionally CT_* settings)"
+  header "Container"
+  if [[ -n "$(pct list 2>/dev/null | tail -n +2)" ]]; then
+    echo "   Existing containers:"; pct list | sed 's/^/     /'
+  fi
+  ask CTID "Container ID (existing to update it, or a free one to create it)" \
+    "$(pvesh get /cluster/nextid 2>/dev/null || echo 100)" '^[1-9][0-9]{2,8}$'
+fi
+[[ $CTID =~ ^[1-9][0-9]{2,8}$ ]] || die "CTID must be a number ≥ 100, got '$CTID'"
+CONF=/etc/pve/lxc/$CTID.conf
+ct_name=''
+
+if pct status "$CTID" >/dev/null 2>&1; then
+  ct_name=$(pct config "$CTID" | awk '/^hostname:/{print $2}')
+  if ((!CHECK_ONLY)) && ! confirm "Install into existing CT $CTID (${ct_name:-?})? Its config may be changed and it may be restarted"; then
+    die "aborted"
+  fi
+elif ((!CHECK_ONLY)); then
+  if qm status "$CTID" >/dev/null 2>&1; then die "ID $CTID is used by a VM"; fi
+  echo "   CT $CTID does not exist and will be created:"
+  ask CT_HOSTNAME "Hostname" "cloud-desktop" '^[a-zA-Z0-9][a-zA-Z0-9.-]*$'
+  ask CT_STORAGE "Root disk storage" \
+    "$(pvesm status -content rootdir 2>/dev/null | awk 'NR>1 && $3=="active"{print $1; exit}' | grep . || echo local-lvm)" '^[A-Za-z0-9_.-]+$'
+  ask CT_DISK "Root disk size, GB" 64 '^[0-9]+$'
+  ask CT_CORES "CPU cores" 8 '^[0-9]+$'
+  ask CT_MEMORY "Memory, MB" 16384 '^[0-9]+$'
+  ask CT_BRIDGE "Network bridge (DHCP)" vmbr0 '^[A-Za-z0-9_.-]+$'
+  confirm "Create CT $CTID '$CT_HOSTNAME' on $CT_STORAGE (${CT_DISK} GB, $CT_CORES cores, $CT_MEMORY MB, $CT_BRIDGE)?" || die "aborted"
+fi
+
 header "Host"
 if [[ -n $CDH_VERSION || ! -x $CDH_BIN || ! -d $REPO/scripts ]]; then
-  msg_info "Downloading release ${CDH_VERSION:-latest} from $CDH_GH_REPO"
-  fetch_release || die "could not download/verify cdh-fc$FEDORA-x86_64.tar.gz from $CDH_GH_REPO (${CDH_VERSION:-latest})"
-  msg_ok "Release ${CDH_VERSION:-latest} downloaded" "sha256 ok"
+  if ((CHECK_ONLY)) && fetch_manifest; then
+    msg_ok "Release ${CDH_VERSION:-latest} manifest" "bundle not downloaded in check mode"
+  else
+    msg_info "Downloading release ${CDH_VERSION:-latest} from $CDH_GH_REPO"
+    fetch_release || die "could not download/verify cdh-fc$FEDORA-x86_64.tar.gz from $CDH_GH_REPO (${CDH_VERSION:-latest})"
+    MANIFEST=$(local_manifest)
+    msg_ok "Release ${CDH_VERSION:-latest} downloaded" "sha256 ok"
+  fi
 else
+  MANIFEST=$(local_manifest)
   msg_ok "Using local build" "$CDH_BIN"
 fi
 
@@ -163,13 +256,24 @@ else
   die "nvidia-drm modeset=1 configured: reboot the host, then re-run this script"
 fi
 
-chk_uinput() { [[ -c /dev/uinput ]] && grep -qx uinput /etc/modules-load.d/uinput.conf; }
+chk_uinput() {
+  local r=0
+  [[ -c /dev/uinput ]] || { echo "/dev/uinput missing (module not loaded)"; r=1; }
+  grep -qsx uinput /etc/modules-load.d/uinput.conf || { echo "not in /etc/modules-load.d/uinput.conf (lost on reboot)"; r=1; }
+  return $r
+}
 do_uinput()  { modprobe uinput; echo uinput >/etc/modules-load.d/uinput.conf; }
 step "uinput loaded + persistent" chk_uinput do_uinput
 
 UVM_RULE=/etc/udev/rules.d/70-nvidia-uvm.rules
 UVM_RULE_TXT='KERNEL=="nvidia_uvm", RUN+="/usr/bin/nvidia-modprobe -c0 -u"'
-chk_uvm() { [[ -c /dev/nvidia-uvm ]] && grep -qx nvidia_uvm /etc/modules-load.d/nvidia-uvm.conf && [[ "$(cat $UVM_RULE)" == "$UVM_RULE_TXT" ]]; }
+chk_uvm() {
+  local r=0
+  [[ -c /dev/nvidia-uvm ]] || { echo "/dev/nvidia-uvm missing"; r=1; }
+  grep -qsx nvidia_uvm /etc/modules-load.d/nvidia-uvm.conf || { echo "nvidia_uvm not in /etc/modules-load.d/nvidia-uvm.conf"; r=1; }
+  [[ "$(cat $UVM_RULE 2>/dev/null)" == "$UVM_RULE_TXT" ]] || { echo "no $UVM_RULE (device node not recreated after reboot)"; r=1; }
+  return $r
+}
 do_uvm() {
   echo nvidia_uvm >/etc/modules-load.d/nvidia-uvm.conf
   echo "$UVM_RULE_TXT" >$UVM_RULE
@@ -179,7 +283,7 @@ do_uvm() {
 }
 step "nvidia-uvm device + persistent" chk_uvm do_uvm
 
-header "Container $CTID"
+header "Container $CTID${ct_name:+ ($ct_name)}"
 template() { pveam list "$TEMPLATE_STORAGE" 2>/dev/null | awk -v p="fedora-$FEDORA-default" '$1 ~ p {print $1}' | sort | tail -1; }
 chk_template() { pct status "$CTID" >/dev/null 2>&1 || [[ -n "$(template)" ]]; }
 do_template() {
@@ -221,9 +325,9 @@ RAW_LINES=(
   "lxc.cap.drop: mac_admin mac_override sys_module sys_pacct sys_rawio sys_time"
   "lxc.mount.entry: tmpfs dev/shm tmpfs rw,nosuid,nodev,mode=1777,size=$SHM_SIZE,create=dir 0 0"
 )
-main_conf() { sed '/^\[/,$d' "$CONF"; }
+main_conf() { sed -e '/^\[/,$d' -e 's/[[:space:]]*$//' "$CONF"; }   # pve may keep "key: " with a trailing space
 missing_raw() { local l; for l in "${RAW_LINES[@]}"; do main_conf | grep -qxF "$l" || echo "$l"; done; }
-chk_raw() { [[ -z "$(missing_raw)" ]]; }
+chk_raw() { local m; m=$(missing_raw); [[ -z $m ]] || { sed 's/^/missing: /' <<<"$m"; return 1; }; }
 do_raw() {
   local add; add=$(missing_raw)
   # "lxc.cap.drop:" (reset) must come right before the explicit list
@@ -303,7 +407,7 @@ chk_inrule() { [[ "$(cat $INPUT_RULE)" == "$INPUT_RULE_TXT" ]]; }
 do_inrule()  { echo "$INPUT_RULE_TXT" >$INPUT_RULE; udevadm control --reload; }
 step "host udev rule: Sunshine virtual input → host uid $HOST_UID" chk_inrule do_inrule
 
-chk_pkgs() { ct rpm -q "${CT_PACKAGES[@]}"; }
+chk_pkgs() { rpm_missing "${CT_PACKAGES[@]}"; }
 do_pkgs()  { ct dnf install -y "${CT_PACKAGES[@]}"; }
 step "packages (KWin, Plasma, PipeWire, Xwayland…)" chk_pkgs do_pkgs
 
@@ -323,19 +427,26 @@ chk_linger() { ct test -e "/var/lib/systemd/linger/$CT_USER"; }
 do_linger()  { ct loginctl enable-linger "$CT_USER"; }
 step "linger for '$CT_USER'" chk_linger do_linger
 
-chk_cdh() { [[ "$(sha256sum <"$CDH_BIN" | cut -d' ' -f1)" == "$(ct sha256sum /usr/local/bin/cloud-desktop-host | cut -d' ' -f1)" ]]; }
+chk_cdh() {
+  ct test -x /usr/local/bin/cloud-desktop-host || { why "/usr/local/bin/cloud-desktop-host not installed"; return; }
+  [[ "$(awk '$2=="cloud-desktop-host"{print $1}' <<<"$MANIFEST")" == "$(ct sha256sum /usr/local/bin/cloud-desktop-host | cut -d' ' -f1)" ]] \
+    || why "/usr/local/bin/cloud-desktop-host differs from the release/local build"
+}
 do_cdh()  { pct push "$CTID" "$CDH_BIN" /usr/local/bin/cloud-desktop-host --perms 0755; }
 step "cloud-desktop-host binary" chk_cdh do_cdh
 
-manifest() { (cd "$REPO" && find scripts configs -type f | sort | xargs sha256sum); }
-chk_scripts() { manifest | pct exec "$CTID" -- runuser -u "$CT_USER" -- sh -c "cd $CT_CDH && sha256sum -c --quiet --status -"; }
+manifest() { grep -E '  (scripts|configs)/' <<<"$MANIFEST"; }
+chk_scripts() { manifest | pct exec "$CTID" -- runuser -u "$CT_USER" -- sh -c "cd $CT_CDH 2>/dev/null || { echo '$CT_CDH missing'; exit 1; }
+    out=\$(sha256sum -c --quiet - 2>/dev/null); rc=\$?
+    printf '%s\n' \"\$out\" | sed -n 's/: FAILED.*/ differs or is missing/p'; exit \$rc"; }
 do_scripts() {
   tar -C "$REPO" -c scripts configs | pct exec "$CTID" -- runuser -u "$CT_USER" -- \
     sh -c "mkdir -p $CT_CDH && tar -C $CT_CDH -x && chmod +x $CT_CDH/scripts/*.sh"
 }
 step "CDH scripts + configs in $CT_CDH" chk_scripts do_scripts
 
-chk_sunshine() { ct rpm -q sunshine; }
+# LizardByte's RPM is named "Sunshine" (capital S): match case-insensitively
+chk_sunshine() { ct_sh 'rpm -qa --qf "%{NAME}\n" | grep -qix sunshine' || why "Sunshine RPM not installed"; }
 do_sunshine() {
   if [[ -f $SUNSHINE_RPM ]]; then
     pct push "$CTID" "$SUNSHINE_RPM" /tmp/sunshine.rpm
@@ -365,11 +476,11 @@ do_ssconf() {
 step "Sunshine config (kept if it already exists)" chk_ssconf do_ssconf
 
 if ((INSTALL_STEAM)); then
-  chk_rpmfusion() { ct rpm -q rpmfusion-nonfree-release; }
+  chk_rpmfusion() { rpm_missing rpmfusion-nonfree-release; }
   do_rpmfusion()  { ct dnf install -y "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$FEDORA.noarch.rpm"; }
   step "RPM Fusion nonfree" chk_rpmfusion do_rpmfusion
 
-  chk_steam() { ct rpm -q steam gamescope mangohud; }
+  chk_steam() { rpm_missing steam gamescope mangohud; }
   do_steam()  { ct dnf install -y steam gamescope mangohud; }
   step "Steam + Gamescope + MangoHud" chk_steam do_steam
 

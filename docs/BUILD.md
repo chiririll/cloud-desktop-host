@@ -47,6 +47,8 @@ git submodule update --init --recursive subprojects/sunshine
 
 ## 2. cloud-desktop-host + wlroots
 
+> Готовый бинарник без зависимостей сборки в контейнере: `docker build -o dist .` или релиз GitHub, см. [RELEASE_BUILD.md](RELEASE_BUILD.md). Установка на Proxmox: [PVE_INSTALLER.md](PVE_INSTALLER.md).
+
 **wlroots** для CDH **не** собирается отдельным шагом: Meson подключает его как `subproject('wlroots')`.
 
 ### 2.1 Зависимости

@@ -146,6 +146,8 @@ cloud-desktop-host/
 | [Архитектура CDH](docs/Архитектура%20cloud-desktop-host%20%28CDH%29.md) | Детальное описание всех модулей, протоколов, рендер-цикла, потоков данных, ключевых решений |
 | [docs/BUILD.md](docs/BUILD.md) | Сборка CDH, Gamescope и Sunshine (CMake/Meson, CUDA, Node/npm) |
 | [docs/INSTALL_AND_CONFIG.md](docs/INSTALL_AND_CONFIG.md) | Установка: хост PVE (LXC conf, NVIDIA, cgroup2) и контейнер (Fedora, Sunshine, скрипты) |
+| [docs/RELEASE_BUILD.md](docs/RELEASE_BUILD.md) | Готовый бинарник: сборка в Docker, релизы через GitHub Actions (EN) |
+| [docs/PVE_INSTALLER.md](docs/PVE_INSTALLER.md) | `pve/install.sh`: установка на Proxmox одной командой, идемпотентно (EN) |
 | [docs/SUBPROJECTS.md](docs/SUBPROJECTS.md) | Git submodules: wlroots, Gamescope, Sunshine — версии и управление |
 
 ---

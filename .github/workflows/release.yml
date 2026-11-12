@@ -34,7 +34,8 @@ jobs:
           cp pve/install.sh pkg/cdh/pve/
           tar -C pkg -czf $B.tar.gz cdh
           cp dist/cloud-desktop-host cloud-desktop-host-fc$FEDORA-x86_64
-          sha256sum $B.tar.gz cloud-desktop-host-fc$FEDORA-x86_64 > SHA256SUMS
+          (cd pkg/cdh && { sha256sum cloud-desktop-host; find scripts configs -type f | sort | xargs sha256sum; }) > MANIFEST-fc$FEDORA
+          sha256sum $B.tar.gz cloud-desktop-host-fc$FEDORA-x86_64 MANIFEST-fc$FEDORA > SHA256SUMS
           cat SHA256SUMS
 
       - name: Publish release
@@ -42,7 +43,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          files="cdh-fc$FEDORA-x86_64.tar.gz cloud-desktop-host-fc$FEDORA-x86_64 SHA256SUMS"
+          files="cdh-fc$FEDORA-x86_64.tar.gz cloud-desktop-host-fc$FEDORA-x86_64 MANIFEST-fc$FEDORA SHA256SUMS"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" $files --clobber
           else
@@ -56,4 +57,5 @@ jobs:
           name: cdh-fc${{ env.FEDORA }}-x86_64
           path: |
             cdh-fc${{ env.FEDORA }}-x86_64.tar.gz
+            MANIFEST-fc${{ env.FEDORA }}
             SHA256SUMS
