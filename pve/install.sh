@@ -17,7 +17,8 @@
 #
 # Settings (env vars, all optional when run interactively):
 #   CTID  CT_HOSTNAME  CT_STORAGE  CT_DISK  CT_CORES  CT_MEMORY  CT_BRIDGE
-#   TEMPLATE_STORAGE=local  FEDORA=43  CT_USER=user  INSTALL_STEAM=1  SHM_SIZE=4G
+#   TEMPLATE_STORAGE=local  FEDORA=43  CT_USER=user  SHM_SIZE=4G
+#   INSTALL_STEAM=1|0   Steam + Gamescope + MangoHud (asked; default yes without a tty)
 #   YES=1   don't ask for confirmation before changing an existing CT
 #   NVIDIA_PCI=0000:01:00.0   pick the GPU if there are several NVIDIA cards
 #   CDH_VERSION=v1.0.0   use this release (default: local dist/, else latest)
@@ -36,7 +37,7 @@ YES=${YES:-0}
 TEMPLATE_STORAGE=${TEMPLATE_STORAGE:-local}
 FEDORA=${FEDORA:-43}
 CT_USER=${CT_USER:-user}
-INSTALL_STEAM=${INSTALL_STEAM:-1}
+INSTALL_STEAM=${INSTALL_STEAM:-}
 SHM_SIZE=${SHM_SIZE:-4G}
 NVIDIA_PCI=${NVIDIA_PCI:-}
 CSRF_EXTRA=${CSRF_EXTRA:-}
@@ -45,7 +46,7 @@ CDH_GH_REPO=${CDH_GH_REPO:-chiririll/cloud-desktop-host}
 CDH_VERSION=${CDH_VERSION:-}
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/.." && pwd)
 CDH_BIN=$REPO/dist/cloud-desktop-host
-# empty = resolve the latest LizardByte release's fc$FEDORA asset at install time
+# empty = resolve the latest Sunshine release's fc$FEDORA asset at install time
 # (asset names embed the version, so /releases/latest/download/<name> can't be used)
 SUNSHINE_RPM=${SUNSHINE_RPM:-}
 CT_CDH=/opt/cloud-desktop-host   # scripts + configs, root-owned, read-only for the user
@@ -89,12 +90,13 @@ ask() {
   done
   printf -v "$var" '%s' "$ans"
 }
-confirm() { # confirm "question" → 0 if yes
-  local ans
+confirm() { # confirm "question" [default y|n, n] → 0 if yes
+  local ans def=${2:-n} hint=y/N
+  [[ $def == y ]] && hint=Y/n
   ((YES)) && return 0
   have_tty || return 0
-  read -rp " ${YW}?${CL} $1 [y/N]: " ans </dev/tty || exit 1
-  [[ $ans =~ ^[Yy] ]]
+  read -rp " ${YW}?${CL} $1 [$hint]: " ans </dev/tty || exit 1
+  [[ ${ans:-$def} =~ ^[Yy] ]]
 }
 
 NEEDED=0
@@ -229,6 +231,11 @@ elif ((!CHECK_ONLY)); then
   ask CT_BRIDGE "Network bridge (DHCP)" vmbr0 '^[A-Za-z0-9_.-]+$'
   confirm "Create CT $CTID '$CT_HOSTNAME' on $CT_STORAGE (${CT_DISK} GB, $CT_CORES cores, $CT_MEMORY MB, $CT_BRIDGE)?" || die "aborted"
 fi
+
+if [[ -z $INSTALL_STEAM ]]; then
+  confirm "Install Steam + Gamescope + MangoHud?" y && INSTALL_STEAM=1 || INSTALL_STEAM=0
+fi
+[[ $INSTALL_STEAM =~ ^[01]$ ]] || die "INSTALL_STEAM must be 1 or 0, got '$INSTALL_STEAM'"
 
 header "Host"
 if [[ -n $CDH_VERSION || ! -x $CDH_BIN || ! -d $REPO/scripts ]]; then
@@ -441,7 +448,7 @@ do_scripts() {
 }
 step "CDH scripts + configs in $CT_CDH" chk_scripts do_scripts
 
-# LizardByte's RPM is named "Sunshine" (capital S): match case-insensitively
+# The RPM is named "Sunshine" (capital S): match case-insensitively
 chk_sunshine() { ct_sh 'rpm -qa --qf "%{NAME}\n" | grep -qix sunshine' || why "Sunshine RPM not installed"; }
 latest_sunshine_rpm() {
   curl -fsSL https://api.github.com/repos/LizardByte/Sunshine/releases/latest \
@@ -476,10 +483,21 @@ do_ssconf() {
   ct_user "mkdir -p ~/.config/sunshine
     test -s ~/.config/sunshine/sunshine.conf || printf '%s\n' \
       'capture = wlr' 'encoder = nvenc' 'gamepad = xone' 'system_tray = disabled' \
-      'csrf_allowed_origins = $origins' > ~/.config/sunshine/sunshine.conf
-    test -s ~/.config/sunshine/apps.json || cp $CT_CDH/configs/sunshine/apps.json ~/.config/sunshine/"
+      'csrf_allowed_origins = $origins' > ~/.config/sunshine/sunshine.conf"
+  ct_user 'test -s ~/.config/sunshine/apps.json' && return 0
+  if ((INSTALL_STEAM)); then
+    ct_user "cp $CT_CDH/configs/sunshine/apps.json ~/.config/sunshine/"
+  else   # no Steam: only the Desktop app
+    printf '%s\n' '{' '  "env": {},' '  "apps": [' '    {' '      "name": "Desktop",' '      "image-path": "",' \
+      '      "prep-cmd": [' '        {' \
+      "          \"do\": \"$CT_CDH/scripts/sunshine-prep-desktop.sh\"," \
+      "          \"undo\": \"$CT_CDH/scripts/sunshine-undo-desktop.sh\"" \
+      '        }' '      ]' '    }' '  ]' '}' \
+      | pct exec "$CTID" -- runuser -l "$CT_USER" -c 'cat > ~/.config/sunshine/apps.json'
+  fi
 }
 step "Sunshine config (kept if it already exists)" chk_ssconf do_ssconf
+
 
 if ((INSTALL_STEAM)); then
   chk_rpmfusion() { rpm_missing rpmfusion-nonfree-release; }
@@ -495,6 +513,41 @@ if ((INSTALL_STEAM)); then
   step "Gamescope has no file caps" chk_gscap do_gscap
 fi
 
+# The whole stack (compositor, KWin, Plasma, Sunshine) as a user service,
+# started at boot thanks to linger (step above). Last, so it starts with
+# everything installed.
+SESSION_UNIT=cloud-desktop-host.service
+SESSION_UNIT_FILE=/etc/systemd/user/$SESSION_UNIT
+SESSION_UNIT_TXT=$(cat <<EOF
+[Unit]
+Description=cloud-desktop-host session (compositor, KWin, Plasma, Sunshine)
+
+[Service]
+Type=simple
+# run.sh starts its own D-Bus session (dbus-launch) when this is unset
+UnsetEnvironment=DBUS_SESSION_BUS_ADDRESS
+ExecStart=$CT_CDH/scripts/run.sh
+# run.sh exits when the compositor dies: bring the whole stack back
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+)
+ct_systemctl() { ct_user "XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user $*"; }
+chk_session() {
+  [[ "$(ct cat "$SESSION_UNIT_FILE" 2>/dev/null)" == "$SESSION_UNIT_TXT" ]] || why "$SESSION_UNIT_FILE missing or outdated"
+  ct_systemctl is-enabled -q "$SESSION_UNIT" || why "$SESSION_UNIT not enabled for '$CT_USER'"
+}
+do_session() {
+  printf '%s\n' "$SESSION_UNIT_TXT" | pct exec "$CTID" -- sh -c "mkdir -p ${SESSION_UNIT_FILE%/*} && cat > $SESSION_UNIT_FILE"
+  ct rm -f /etc/systemd/user/cdh-sunshine.service   # earlier Sunshine-only unit
+  ct_systemctl daemon-reload
+  ct_systemctl enable --now "$SESSION_UNIT"
+}
+step "user service $SESSION_UNIT (starts at boot)" chk_session do_session
+
 echo
 if ((CHECK_ONLY)); then
   ((NEEDED)) && echo "${YW}$NEEDED step(s) needed.${CL} Run without --check to apply." \
@@ -504,7 +557,9 @@ fi
 IP=$(ct_ip)
 cat <<EOF
 ${GN}Done.${CL} Log: $LOG
-  Start:   pct exec $CTID -- runuser -l $CT_USER -c '$CT_CDH/scripts/run.sh'
+  Session: runs at boot as $CT_USER's user service $SESSION_UNIT. Control it with:
+    pct exec $CTID -- runuser -l $CT_USER -c 'XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user restart $SESSION_UNIT'
+    logs: journalctl --user -u $SESSION_UNIT, and /tmp/cdhost-logs/ in the CT
   Web UI:  https://$IP:47990   (create the Sunshine login on first visit)
   Moonlight: add $IP, enter the PIN in the web UI.
   Set a password for '$CT_USER' if you need it:  pct exec $CTID -- passwd $CT_USER
