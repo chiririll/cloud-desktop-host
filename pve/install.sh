@@ -23,6 +23,7 @@
 #   NVIDIA_PCI=0000:01:00.0   pick the GPU if there are several NVIDIA cards
 #   CDH_VERSION=v1.0.0   use this release (default: local dist/, else latest)
 #   CDH_GH_REPO=chiririll/cloud-desktop-host   SUNSHINE_RPM=<url or local .rpm>
+#   CLOUD_MOUSE_RPM=<url or local .rpm>   (default: latest kcm-cloud-mouse release; "none" to skip)
 #   CSRF_EXTRA=https://gaming.example.org   extra Sunshine web UI origins
 set -euo pipefail
 
@@ -49,6 +50,9 @@ CDH_BIN=$REPO/dist/cloud-desktop-host
 # empty = resolve the latest Sunshine release's fc$FEDORA asset at install time
 # (asset names embed the version, so /releases/latest/download/<name> can't be used)
 SUNSHINE_RPM=${SUNSHINE_RPM:-}
+# KDE System Settings → Input Devices → Cloud Mouse (pointer speed etc. over org.gamescope.Input;
+# KWin's own mouse page can't see CDH's input devices)
+CLOUD_MOUSE_RPM=${CLOUD_MOUSE_RPM:-https://github.com/chiririll/kcm-cloud-mouse/releases/latest/download/kcm-cloud-mouse-fc$FEDORA-x86_64.rpm}
 CT_CDH=/opt/cloud-desktop-host   # scripts + configs, root-owned, read-only for the user
 LOG=/var/log/cdh-lxc-install.log
 
@@ -497,6 +501,20 @@ do_ssconf() {
   fi
 }
 step "Sunshine config (kept if it already exists)" chk_ssconf do_ssconf
+
+if [[ $CLOUD_MOUSE_RPM != none ]]; then
+  chk_cloudmouse() { rpm_missing kcm-cloud-mouse; }
+  do_cloudmouse() {
+    if [[ -f $CLOUD_MOUSE_RPM ]]; then
+      pct push "$CTID" "$CLOUD_MOUSE_RPM" /tmp/kcm-cloud-mouse.rpm
+      ct dnf install -y /tmp/kcm-cloud-mouse.rpm || { ct rm -f /tmp/kcm-cloud-mouse.rpm; return 1; }
+      ct rm -f /tmp/kcm-cloud-mouse.rpm
+      return 0
+    fi
+    ct dnf install -y "$CLOUD_MOUSE_RPM"
+  }
+  step "KCM Cloud Mouse (System Settings → Input Devices)" chk_cloudmouse do_cloudmouse
+fi
 
 
 if ((INSTALL_STEAM)); then
