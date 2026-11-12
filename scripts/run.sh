@@ -10,7 +10,7 @@
 set -euo pipefail
 
 # ── Параметры ──────────────────────────────────────────────────
-HOST_BIN="/home/user/cloud-desktop-host/build/cloud-desktop-host"
+HOST_BIN="${CDH_BIN:-$(command -v cloud-desktop-host || echo /home/user/cloud-desktop-host/build/cloud-desktop-host)}"
 LOG_DIR="/tmp/cdhost-logs"
 WAIT_SOCKET=15
 WAIT_KWIN=20

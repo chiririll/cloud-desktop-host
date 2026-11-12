@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-HOST_BIN="/home/user/cloud-desktop-host/build/cloud-desktop-host"
+HOST_BIN="${CDH_BIN:-$(command -v cloud-desktop-host || echo /home/user/cloud-desktop-host/build/cloud-desktop-host)}"
 USER_ID=$(id -u)
 export XDG_RUNTIME_DIR="/run/user/$USER_ID"
 export QT_QPA_PLATFORMTHEME=kde

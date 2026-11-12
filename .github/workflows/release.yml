@@ -1,0 +1,59 @@
+# Push a tag like v0.1.0 → builds the CT bundle and attaches it to a GitHub release.
+# Asset names carry no version, so .../releases/latest/download/<name> always works.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FEDORA: "43"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch wlroots submodule only
+        run: git submodule update --init --depth 1 subprojects/wlroots
+
+      - name: Build binary (Fedora ${{ env.FEDORA }}, static wlroots)
+        run: docker build --build-arg FEDORA=$FEDORA -o dist .
+
+      - name: Package
+        run: |
+          B=cdh-fc$FEDORA-x86_64
+          mkdir -p pkg/cdh/pve
+          cp dist/cloud-desktop-host pkg/cdh/
+          cp -r scripts configs pkg/cdh/
+          cp pve/install.sh pkg/cdh/pve/
+          tar -C pkg -czf $B.tar.gz cdh
+          cp dist/cloud-desktop-host cloud-desktop-host-fc$FEDORA-x86_64
+          sha256sum $B.tar.gz cloud-desktop-host-fc$FEDORA-x86_64 > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files="cdh-fc$FEDORA-x86_64.tar.gz cloud-desktop-host-fc$FEDORA-x86_64 SHA256SUMS"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" $files --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" $files --generate-notes
+          fi
+
+      - name: Keep artifacts (manual runs)
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdh-fc${{ env.FEDORA }}-x86_64
+          path: |
+            cdh-fc${{ env.FEDORA }}-x86_64.tar.gz
+            SHA256SUMS

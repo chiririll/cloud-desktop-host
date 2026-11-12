@@ -4,9 +4,15 @@
 
 set -euo pipefail
 
-GAMESCOPE_BIN="/home/user/cloud-desktop-host/subprojects/gamescope/build/src/gamescope"
 LOG="/tmp/prep-gamescope.log"
 echo "[prep-gamescope] $(date) Starting..." >> "$LOG"
+
+# $GAMESCOPE_BIN → gamescope from PATH (dnf package) → submodule build
+GAMESCOPE_BIN="${GAMESCOPE_BIN:-$(command -v gamescope || echo /home/user/cloud-desktop-host/subprojects/gamescope/build/src/gamescope)}"
+fail() { echo "[prep-gamescope] ERROR: $*" >> "$LOG"; echo "[prep-gamescope] ERROR: $*" >&2; exit 1; }
+# Check BEFORE killing KWin, otherwise a failure leaves an empty screen
+[ -x "$GAMESCOPE_BIN" ] || fail "gamescope not found ($GAMESCOPE_BIN). dnf install gamescope"
+command -v steam >/dev/null || fail "steam not found. dnf install steam (rpmfusion-nonfree)"
 
 UID_SELF=$(id -u)
 XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$UID_SELF}"
@@ -51,14 +57,13 @@ H="${SUNSHINE_CLIENT_HEIGHT:-1080}"
 R="${SUNSHINE_CLIENT_FPS:-60}"
 
 echo "[prep-gamescope] SetOutputMode ${W}x${H}@${R}fps" >> "$LOG"
+RC=0
 busctl --user call \
     org.gamescope.Input \
     /org/gamescope/Input \
     org.gamescope.InputDeviceManager \
     SetOutputMode uuu \
-    "$W" "$H" "$R"
-
-RC=$?
+    "$W" "$H" "$R" || RC=$?
 echo "[prep-gamescope] busctl exit code: $RC" >> "$LOG"
 [ $RC -ne 0 ] && exit $RC
 
@@ -93,6 +98,10 @@ chmod 444 "$MANGOHUD_CFG"
 export MANGOHUD_CONFIGFILE="$MANGOHUD_CFG"
 echo "[prep-gamescope] MangoHud config: $MANGOHUD_CFG (read-only)" >> "$LOG"
 
+# --mangoapp only if MangoHud is installed (dnf install mangohud)
+MANGOAPP_ARG=""
+command -v mangoapp >/dev/null && MANGOAPP_ARG="--mangoapp"
+
 # GLFW_PLATFORM=x11 — На Fedora 43 glfw-3.4 (универсальная) при наличии
 # WAYLAND_DISPLAY автовыбирает Wayland backend → MangoApp создаёт Wayland
 # surface вместо X11 window → GAMESCOPE_EXTERNAL_OVERLAY atom не ставится.
@@ -106,7 +115,7 @@ WAYLAND_DISPLAY=wayland-cd \
     -w "$W" -h "$H" \
     -r "$R" \
     -e \
-    --mangoapp \
+    $MANGOAPP_ARG \
     --xwayland-count 2 \
     --force-grab-cursor \
     -f \
@@ -115,4 +124,6 @@ WAYLAND_DISPLAY=wayland-cd \
 
 GS_PID=$!
 echo "[prep-gamescope] Gamescope PID=${GS_PID}" >> "$LOG"
+sleep 2
+kill -0 "$GS_PID" 2>/dev/null || fail "gamescope exited right away, see /tmp/gamescope.log"
 echo "[prep-gamescope] Done" >> "$LOG"
