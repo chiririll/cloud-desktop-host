@@ -107,7 +107,7 @@ The workflow:
 
    | Asset | Contents |
    |---|---|
-   | `cdh-fc43-x86_64.tar.gz` | `cdh/cloud-desktop-host`, `cdh/scripts/`, `cdh/configs/`, `cdh/pve/install.sh` |
+   | `cdh-fc43-x86_64.tar.gz` | `cdh/cloud-desktop-host`, `cdh/scripts/`, `cdh/configs/`, `cdh/pve/install.sh`, `cdh/pve/host-persist.sh` |
    | `cloud-desktop-host-fc43-x86_64` | the bare binary |
    | `SHA256SUMS` | checksums of both |
 

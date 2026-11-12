@@ -31,7 +31,7 @@ jobs:
           mkdir -p pkg/cdh/pve
           cp dist/cloud-desktop-host pkg/cdh/
           cp -r scripts configs pkg/cdh/
-          cp pve/install.sh pkg/cdh/pve/
+          cp pve/install.sh pve/host-persist.sh pkg/cdh/pve/
           tar -C pkg -czf $B.tar.gz cdh
           cp dist/cloud-desktop-host cloud-desktop-host-fc$FEDORA-x86_64
           (cd pkg/cdh && { sha256sum cloud-desktop-host; find scripts configs -type f | sort | xargs sha256sum; }) > MANIFEST-fc$FEDORA

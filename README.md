@@ -147,12 +147,34 @@ cloud-desktop-host/
 | [docs/BUILD.md](docs/BUILD.md) | Сборка CDH, Gamescope и Sunshine (CMake/Meson, CUDA, Node/npm) |
 | [docs/INSTALL_AND_CONFIG.md](docs/INSTALL_AND_CONFIG.md) | Установка: хост PVE (LXC conf, NVIDIA, cgroup2) и контейнер (Fedora, Sunshine, скрипты) |
 | [docs/RELEASE_BUILD.md](docs/RELEASE_BUILD.md) | Готовый бинарник: сборка в Docker, релизы через GitHub Actions (EN) |
-| [docs/PVE_INSTALLER.md](docs/PVE_INSTALLER.md) | `pve/install.sh`: установка на Proxmox одной командой, идемпотентно (EN) |
+| [docs/PVE_INSTALLER.md](docs/PVE_INSTALLER.md) | `pve/install.sh`: установка на Proxmox одной командой, идемпотентно; `pve/host-persist.sh` — настройки хоста на случай перезагрузки (EN) |
 | [docs/SUBPROJECTS.md](docs/SUBPROJECTS.md) | Git submodules: wlroots, Gamescope, Sunshine — версии и управление |
 
 ---
 
 ## Быстрый старт
+
+### Proxmox VE, одной командой
+
+На хосте Proxmox от root (NVIDIA-драйвер на хосте уже установлен):
+
+```bash
+# посмотреть, что будет сделано (ничего не меняет)
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/chiririll/cloud-desktop-host/main/pve/install.sh)" -- --check
+
+# установить: создаёт/настраивает LXC, ставит CDH, Sunshine, Steam
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/chiririll/cloud-desktop-host/main/pve/install.sh)"
+```
+
+По желанию: чтобы `nvidia-drm modeset=1`, `uinput` и `nvidia-uvm` поднимались после перезагрузки хоста (тоже есть `--check`):
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/chiririll/cloud-desktop-host/main/pve/host-persist.sh)"
+```
+
+Подробности — [docs/PVE_INSTALLER.md](docs/PVE_INSTALLER.md).
+
+### Сборка из исходников
 
 ```bash
 # Клонировать со всеми субмодулями

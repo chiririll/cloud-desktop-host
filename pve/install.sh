@@ -247,41 +247,34 @@ chk_driver() { [[ -n "$(host_driver)" ]] && drm_node renderD; }
 require "NVIDIA driver loaded ($(host_driver || echo none))" chk_driver \
   "install the NVIDIA driver on the host first (nvidia-smi must work)"
 
-chk_modeset() { [[ "$(cat /sys/module/nvidia_drm/parameters/modeset 2>/dev/null)" == Y ]]; }
-if chk_modeset; then msg_ok "nvidia-drm modeset=Y"
-elif ((CHECK_ONLY)); then msg_todo "nvidia-drm modeset=Y (needs a host reboot)"; NEEDED=$((NEEDED + 1))
-else
-  echo "options nvidia-drm modeset=1" >/etc/modprobe.d/nvidia-drm.conf
-  update-initramfs -u >>"$LOG" 2>&1
-  die "nvidia-drm modeset=1 configured: reboot the host, then re-run this script"
-fi
+# Only what the current boot needs. Settings that survive a host reboot
+# (modeset, modules-load.d, udev rule) are pve/host-persist.sh, opt-in.
+PERSIST_HINT="pve/host-persist.sh"
+chk_modeset() { [[ "$(cat /sys/module/nvidia_drm/parameters/modeset 2>/dev/null)" == Y ]] || why "nvidia_drm modeset is not Y"; }
+require "nvidia-drm modeset=Y" chk_modeset \
+  "set nvidia-drm modeset=1 ($PERSIST_HINT, or yourself) and reboot the host"
 
-chk_uinput() {
+chk_uinput() { [[ -c /dev/uinput ]] || why "/dev/uinput missing (module not loaded)"; }
+do_uinput()  { modprobe uinput; }
+step "uinput loaded" chk_uinput do_uinput
+
+chk_uvm() { [[ -c /dev/nvidia-uvm ]] || why "/dev/nvidia-uvm missing"; }
+do_uvm()  { nvidia-modprobe -c0 -u; }
+step "nvidia-uvm device" chk_uvm do_uvm
+
+# warning only: you may load these some other way (e.g. CUDA/nvidia-smi before the CT starts)
+mod_persisted() { # any file, so a missing /etc/modules doesn't make grep fail
+  local f; for f in /etc/modules /etc/modules-load.d/*.conf; do grep -qsxE "[[:space:]]*$1[[:space:]]*" "$f" && return 0; done; return 1
+}
+chk_reboot() {
   local r=0
-  [[ -c /dev/uinput ]] || { echo "/dev/uinput missing (module not loaded)"; r=1; }
-  grep -qsx uinput /etc/modules-load.d/uinput.conf || { echo "not in /etc/modules-load.d/uinput.conf (lost on reboot)"; r=1; }
+  mod_persisted uinput || { echo "uinput not in /etc/modules-load.d"; r=1; }
+  mod_persisted nvidia_uvm || { echo "nvidia_uvm not in /etc/modules-load.d"; r=1; }
+  grep -qsE 'nvidia-modprobe.* -u' /etc/udev/rules.d/*.rules || { echo "no udev rule creating /dev/nvidia-uvm"; r=1; }
   return $r
 }
-do_uinput()  { modprobe uinput; echo uinput >/etc/modules-load.d/uinput.conf; }
-step "uinput loaded + persistent" chk_uinput do_uinput
-
-UVM_RULE=/etc/udev/rules.d/70-nvidia-uvm.rules
-UVM_RULE_TXT='KERNEL=="nvidia_uvm", RUN+="/usr/bin/nvidia-modprobe -c0 -u"'
-chk_uvm() {
-  local r=0
-  [[ -c /dev/nvidia-uvm ]] || { echo "/dev/nvidia-uvm missing"; r=1; }
-  grep -qsx nvidia_uvm /etc/modules-load.d/nvidia-uvm.conf || { echo "nvidia_uvm not in /etc/modules-load.d/nvidia-uvm.conf"; r=1; }
-  [[ "$(cat $UVM_RULE 2>/dev/null)" == "$UVM_RULE_TXT" ]] || { echo "no $UVM_RULE (device node not recreated after reboot)"; r=1; }
-  return $r
-}
-do_uvm() {
-  echo nvidia_uvm >/etc/modules-load.d/nvidia-uvm.conf
-  echo "$UVM_RULE_TXT" >$UVM_RULE
-  udevadm control --reload
-  modprobe nvidia_uvm
-  nvidia-modprobe -c0 -u
-}
-step "nvidia-uvm device + persistent" chk_uvm do_uvm
+if out=$(chk_reboot); then msg_ok "uinput + nvidia-uvm set up at boot"
+else msg_warn "uinput/nvidia-uvm not set up at boot, load them before starting the CT (or run $PERSIST_HINT)"; show_why "$out"; fi
 
 header "Container $CTID${ct_name:+ ($ct_name)}"
 template() { pveam list "$TEMPLATE_STORAGE" 2>/dev/null | awk -v p="fedora-$FEDORA-default" '$1 ~ p {print $1}' | sort | tail -1; }

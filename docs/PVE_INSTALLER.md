@@ -45,15 +45,17 @@ Output looks like:
  ✔ Release latest downloaded (sha256 ok)
  ✔ NVIDIA driver loaded (595.80)
  ✔ nvidia-drm modeset=Y
- ✔ uinput loaded + persistent
- ✔ nvidia-uvm device + persistent (done)
+ ✔ uinput loaded
+ ✔ nvidia-uvm device (done)
+ ! uinput/nvidia-uvm not set up at boot, load them before starting the CT (or run pve/host-persist.sh)
+     nvidia_uvm not in /etc/modules-load.d
 ── Container 180 (gaming)
  ✔ CT exists
  ◦ GPU/uinput passthrough (/dev/dri/card1, /dev/dri/renderD129) (needed)
  …
 ```
 
-`✔` means already in place, `✔ … (done)` means changed now, and `◦ … (needed)` means it would change (in `--check` mode).
+`✔` means already in place, `✔ … (done)` means changed now, `◦ … (needed)` means it would change (in `--check` mode), and `!` is a warning that `install.sh` does not act on.
 
 At the end the script prints the CT's IP, how to start the stack, and the Sunshine web UI address.
 
@@ -121,9 +123,12 @@ Settings marked "creation only" do not change an existing CT.
 |---|---|---|
 | CDH files | local `dist/` present, or a download is needed | download the release, verify sha256 |
 | NVIDIA driver | `/sys/module/nvidia/version` exists and an NVIDIA render node exists | **stops**: install the driver yourself |
-| `nvidia-drm modeset=Y` | `/sys/module/nvidia_drm/parameters/modeset` | writes `/etc/modprobe.d/nvidia-drm.conf`, runs `update-initramfs -u`, then **stops and asks for a reboot** |
-| uinput | `/dev/uinput` exists, listed in `/etc/modules-load.d/uinput.conf` | `modprobe uinput`, persist |
-| nvidia-uvm | `/dev/nvidia-uvm` exists, module + udev rule persisted | `/etc/modules-load.d/nvidia-uvm.conf`, `/etc/udev/rules.d/70-nvidia-uvm.rules` (runs `nvidia-modprobe -c0 -u`), create the node now |
+| `nvidia-drm modeset=Y` | `/sys/module/nvidia_drm/parameters/modeset` | **stops**: set `modeset=1` (e.g. with [`host-persist.sh`](#optional-survive-a-host-reboot-pvehost-persistsh)) and reboot |
+| uinput | `/dev/uinput` exists | `modprobe uinput` (this boot only) |
+| nvidia-uvm | `/dev/nvidia-uvm` exists | `nvidia-modprobe -c0 -u` (this boot only) |
+| Boot setup | `uinput` and `nvidia_uvm` in `/etc/modules-load.d`, a udev rule runs `nvidia-modprobe -u` | **warning only**, nothing is written |
+
+`install.sh` never writes host boot config. Whatever it loads is gone after a host reboot, unless you load it yourself (for example by running CUDA or `nvidia-smi` before the CT starts) or run `host-persist.sh`.
 
 ### Container config
 
@@ -186,10 +191,30 @@ The gids are looked up inside the CT (`getent group`), so they match Fedora's dy
 
 ---
 
+## Optional: survive a host reboot (`pve/host-persist.sh`)
+
+A separate, opt-in script that writes the host's boot config. It has the same check → apply → check steps and the same `--check` flag.
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/chiririll/cloud-desktop-host/main/pve/host-persist.sh)" -- --check
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/chiririll/cloud-desktop-host/main/pve/host-persist.sh)"
+```
+
+| Step | Check | Apply |
+|---|---|---|
+| `nvidia-drm modeset=1` | `options nvidia-drm modeset=1` in `/etc/modprobe.d/*.conf`, or `nvidia-drm.modeset=1` on the kernel command line | `/etc/modprobe.d/nvidia-drm.conf`, `update-initramfs -u` |
+| uinput | `uinput` in `/etc/modules` or `/etc/modules-load.d/*.conf` | `/etc/modules-load.d/uinput.conf`, `modprobe uinput` |
+| nvidia-uvm | `nvidia_uvm` in modules-load, a udev rule running `nvidia-modprobe -u` | `/etc/modules-load.d/nvidia-uvm.conf`, `/etc/udev/rules.d/70-nvidia-uvm.rules`, load it now |
+
+Existing config you wrote yourself (another file name, the kernel command line) counts as done. If modeset is not active yet, it tells you to reboot.
+
+---
+
 ## What it does not do
 
 - Install or upgrade the **host** NVIDIA driver.
-- **Reboot** the host. After enabling `modeset` it stops and asks you to reboot, then re-run.
+- Write host boot config (`/etc/modprobe.d`, `/etc/modules-load.d`, udev rules for the GPU). That is `host-persist.sh`.
+- **Reboot** the host.
 - Set a password for the CT user: `pct exec <CTID> -- passwd user`.
 - Start the stack or create a systemd service. Start it with `pct exec <CTID> -- runuser -l user -c /opt/cloud-desktop-host/scripts/run.sh`.
 - Pair Moonlight. Open `https://<CT IP>:47990`, create the Sunshine login, and enter the PIN.
@@ -222,7 +247,8 @@ All command output goes to `/var/log/cdh-lxc-install.log` on the host, with a `=
 | `aborted` | you answered no to a confirmation |
 | `<step>: still not satisfied after applying` | the command ran but the check still fails. Example: the passthrough step after `pct` stored options in a different form. Compare with `pct config $CTID \| grep ^dev` |
 | `could not download/verify cdh-fc43-x86_64.tar.gz` | no release yet, wrong `CDH_VERSION`/`FEDORA`, or a checksum mismatch |
-| `nvidia-drm modeset=1 configured: reboot` | expected on the first run on a fresh host |
+| `nvidia-drm modeset=Y: set nvidia-drm modeset=1 … and reboot` | expected on a fresh host: run `host-persist.sh`, reboot, re-run |
+| `! uinput/nvidia-uvm not set up at boot` | only a warning; after a host reboot, load them before starting the CT or run `host-persist.sh` |
 | `CT is privileged or uses a custom lxc.idmap` | the script refuses rather than guess uid mappings |
 | `nvidia-smi works in CT` fails | passthrough is missing, the CT wasn't restarted, or the host and CT driver versions differ |
 
