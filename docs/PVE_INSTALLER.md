@@ -174,7 +174,7 @@ The gids are looked up inside the CT (`getent group`), so they match Fedora's dy
 | `nvidia-smi` | `nvidia-smi -L` works in the CT | **stops**: check passthrough and versions |
 | Linger | `/var/lib/systemd/linger/$CT_USER` | `loginctl enable-linger` |
 | CDH binary | sha256 equal to `/usr/local/bin/cloud-desktop-host` | `pct push` |
-| Scripts + configs | every file matches by sha256 in `~/cloud-desktop-host` | copy `scripts/` and `configs/` with `tar` |
+| Scripts + configs | every file matches by sha256 in `/opt/cloud-desktop-host` | copy `scripts/` and `configs/` with `tar`, owned by root, read-only for the user |
 | Sunshine | `rpm -q sunshine` | `dnf install` (postinst errors about `modprobe`/`udevadm` are expected in a CT and ignored) |
 | Sunshine caps | `getcap` on the real binary is empty | `setcap -r`. File caps set `AT_SECURE`, which breaks ENet, so Moonlight can't connect |
 | Sunshine config | `~/.config/sunshine/sunshine.conf` and `apps.json` exist | write defaults: `capture=wlr`, `encoder=nvenc`, `gamepad=xone`, `system_tray=disabled`, `csrf_allowed_origins=https://<CT IP>:47990[,CSRF_EXTRA]`. **Never overwrites** existing files |
@@ -191,7 +191,7 @@ The gids are looked up inside the CT (`getent group`), so they match Fedora's dy
 - Install or upgrade the **host** NVIDIA driver.
 - **Reboot** the host. After enabling `modeset` it stops and asks you to reboot, then re-run.
 - Set a password for the CT user: `pct exec <CTID> -- passwd user`.
-- Start the stack or create a systemd service. Start it with `pct exec <CTID> -- runuser -l user -c '~/cloud-desktop-host/scripts/run.sh'`.
+- Start the stack or create a systemd service. Start it with `pct exec <CTID> -- runuser -l user -c /opt/cloud-desktop-host/scripts/run.sh`.
 - Pair Moonlight. Open `https://<CT IP>:47990`, create the Sunshine login, and enter the PIN.
 - Overwrite your Sunshine config. To regenerate it, delete `~/.config/sunshine/sunshine.conf` and re-run.
 

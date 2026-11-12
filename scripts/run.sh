@@ -3,7 +3,7 @@
 # DBUS → PipeWire → kactivitymanagerd → compositor → KWin →
 # → kded6 → Plasma → polkit → Sunshine
 #
-# Запуск: /home/user/cloud-desktop-host/scripts/run.sh
+# Запуск: /opt/cloud-desktop-host/scripts/run.sh
 # Логи:  /tmp/cdhost-logs/
 # ────────────────────────────────────────────────────────────────
 

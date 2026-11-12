@@ -46,8 +46,7 @@ CDH_VERSION=${CDH_VERSION:-}
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/.." && pwd)
 CDH_BIN=$REPO/dist/cloud-desktop-host
 SUNSHINE_RPM=${SUNSHINE_RPM:-https://github.com/LizardByte/Sunshine/releases/latest/download/sunshine-fedora-${FEDORA}-amd64.rpm}
-CT_HOME=/home/$CT_USER
-CT_CDH=$CT_HOME/cloud-desktop-host
+CT_CDH=/opt/cloud-desktop-host   # scripts + configs, root-owned, read-only for the user
 LOG=/var/log/cdh-lxc-install.log
 
 CT_PACKAGES=(dbus-daemon dbus-tools dbus-x11 pipewire wireplumber pipewire-pulseaudio
@@ -437,12 +436,13 @@ do_cdh()  { pct push "$CTID" "$CDH_BIN" /usr/local/bin/cloud-desktop-host --perm
 step "cloud-desktop-host binary" chk_cdh do_cdh
 
 manifest() { grep -E '  (scripts|configs)/' <<<"$MANIFEST"; }
-chk_scripts() { manifest | pct exec "$CTID" -- runuser -u "$CT_USER" -- sh -c "cd $CT_CDH 2>/dev/null || { echo '$CT_CDH missing'; exit 1; }
+chk_scripts() { manifest | pct exec "$CTID" -- sh -c "cd $CT_CDH 2>/dev/null || { echo '$CT_CDH missing'; exit 1; }
     out=\$(sha256sum -c --quiet - 2>/dev/null); rc=\$?
     printf '%s\n' \"\$out\" | sed -n 's/: FAILED.*/ differs or is missing/p'; exit \$rc"; }
 do_scripts() {
-  tar -C "$REPO" -c scripts configs | pct exec "$CTID" -- runuser -u "$CT_USER" -- \
-    sh -c "mkdir -p $CT_CDH && tar -C $CT_CDH -x && chmod +x $CT_CDH/scripts/*.sh"
+  tar -C "$REPO" -c scripts configs | pct exec "$CTID" -- sh -c "mkdir -p $CT_CDH &&
+    tar -C $CT_CDH --no-same-owner --no-same-permissions -x &&
+    chown -R root:root $CT_CDH && chmod -R u=rwX,go=rX $CT_CDH && chmod 0755 $CT_CDH/scripts/*.sh"
 }
 step "CDH scripts + configs in $CT_CDH" chk_scripts do_scripts
 

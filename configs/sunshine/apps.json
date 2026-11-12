@@ -6,8 +6,8 @@
       "image-path": "",
       "prep-cmd": [
         {
-          "do": "/home/user/cloud-desktop-host/scripts/sunshine-prep-desktop.sh",
-          "undo": "/home/user/cloud-desktop-host/scripts/sunshine-undo-desktop.sh"
+          "do": "/opt/cloud-desktop-host/scripts/sunshine-prep-desktop.sh",
+          "undo": "/opt/cloud-desktop-host/scripts/sunshine-undo-desktop.sh"
         }
       ]
     },
@@ -16,8 +16,8 @@
       "image-path": "",
       "prep-cmd": [
         {
-          "do": "/home/user/cloud-desktop-host/scripts/sunshine-prep-gamescope.sh",
-          "undo": "/home/user/cloud-desktop-host/scripts/sunshine-undo-gamescope.sh"
+          "do": "/opt/cloud-desktop-host/scripts/sunshine-prep-gamescope.sh",
+          "undo": "/opt/cloud-desktop-host/scripts/sunshine-undo-gamescope.sh"
         }
       ]
     }
