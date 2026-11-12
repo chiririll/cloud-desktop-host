@@ -13,6 +13,7 @@ FPS="${SUNSHINE_CLIENT_FPS:-60}"
 UID_SELF=$(id -u)
 export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/${UID_SELF}/bus}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/${UID_SELF}}"
+export XDG_SESSION_DESKTOP=KDE KDE_SESSION_VERSION=6 KDE_FULL_SESSION=true
 
 # ── 1. SetOutputMode ────────────────────────────────────────────────
 echo "[prep-cmd] SetOutputMode ${W}x${H}@${FPS}fps"

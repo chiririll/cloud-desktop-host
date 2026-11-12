@@ -19,6 +19,11 @@ USER_ID=$(id -u)
 export XDG_RUNTIME_DIR="/run/user/$USER_ID"
 export QT_QPA_PLATFORMTHEME=kde
 export XDG_CURRENT_DESKTOP=KDE
+# xdg-open (Electron/Unity Hub, GTK apps…) picks kde-open only when these are
+# set; without KDE_SESSION_VERSION it falls back to kfmclient and fails silently.
+export XDG_SESSION_DESKTOP=KDE
+export KDE_SESSION_VERSION=6
+export KDE_FULL_SESSION=true
 
 # ── Утилиты ────────────────────────────────────────────────────
 add_ts() {
@@ -188,6 +193,9 @@ dbus-update-activation-environment \
     QT_QPA_PLATFORM=wayland \
     QT_QPA_PLATFORMTHEME=kde \
     XDG_CURRENT_DESKTOP=KDE \
+    XDG_SESSION_DESKTOP=KDE \
+    KDE_SESSION_VERSION=6 \
+    KDE_FULL_SESSION=true \
     XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
     DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     2>/dev/null || true

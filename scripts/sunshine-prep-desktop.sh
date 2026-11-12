@@ -15,6 +15,7 @@ FPS="${SUNSHINE_CLIENT_FPS:-60}"
 UID_SELF=$(id -u)
 export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/${UID_SELF}/bus}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/${UID_SELF}}"
+export XDG_SESSION_DESKTOP=KDE KDE_SESSION_VERSION=6 KDE_FULL_SESSION=true
 
 # ── 1. Cleanup предыдущих режимов ──────────────────────────────────
 echo "[prep-desktop] Cleanup..."
@@ -84,6 +85,9 @@ dbus-update-activation-environment \
     QT_QPA_PLATFORM=wayland \
     QT_QPA_PLATFORMTHEME=kde \
     XDG_CURRENT_DESKTOP=KDE \
+    XDG_SESSION_DESKTOP=KDE \
+    KDE_SESSION_VERSION=6 \
+    KDE_FULL_SESSION=true \
     XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
     DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     2>/dev/null || true

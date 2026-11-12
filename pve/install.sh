@@ -51,7 +51,8 @@ CT_CDH=$CT_HOME/cloud-desktop-host
 LOG=/var/log/cdh-lxc-install.log
 
 CT_PACKAGES=(dbus-daemon dbus-tools dbus-x11 pipewire wireplumber pipewire-pulseaudio
-  pipewire-utils xorg-x11-server-Xwayland kwin plasma-desktop grim curl libcap xprop)
+  pipewire-utils xorg-x11-server-Xwayland kwin plasma-desktop grim curl libcap xprop
+  xdg-utils kde-cli-tools)
 
 CHECK_ONLY=0
 case "${1:-}" in
