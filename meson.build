@@ -6,7 +6,7 @@ project('cloud-desktop-host', ['c', 'cpp'],
     'warning_level=2',
   ])
 
-# wlroots 0.18.3 как subproject (компилируется как C)
+# wlroots 0.20.2 как subproject (компилируется как C)
 wlroots_proj = subproject('wlroots', default_options: [
   'examples=false',
 ])

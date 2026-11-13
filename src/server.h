@@ -5,7 +5,10 @@
 #ifndef CD_SERVER_H
 #define CD_SERVER_H
 
-/* wlroots — C API, нужен extern "C" для C++ */
+/* wlroots — C API, нужен extern "C" для C++.
+ * wlroots >= 0.19 использует в прототипах C99 `float m[static 9]`, что не парсится
+ * в C++: на время include убираем ключевое слово `static` (см. wlr_cxx_begin.h). */
+#include "wlr_cxx_begin.h"
 extern "C" {
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
@@ -18,6 +21,7 @@ extern "C" {
 #include <wlr/types/wlr_relative_pointer_v1.h>
 #include <wlr/types/wlr_pointer_constraints_v1.h>
 }
+#include "wlr_cxx_end.h"
 
 #include "dbus_input.h"
 

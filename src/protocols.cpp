@@ -127,7 +127,7 @@ void cd_register_protocols(struct cd_server *server) {
     wlr_screencopy_manager_v1_create(display);
 
     /* 13. wp_presentation */
-    wlr_presentation_create(display, server->backend);
+    wlr_presentation_create(display, server->backend, 2);
 
     /* 14. xdg_decoration_manager */
     wlr_xdg_decoration_manager_v1_create(display);

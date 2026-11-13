@@ -1,0 +1,15 @@
+{
+  "env": {},
+  "apps": [
+    {
+      "name": "Desktop",
+      "image-path": "",
+      "prep-cmd": [
+        {
+          "do": "/opt/cloud-desktop-host/scripts/sunshine-prep-desktop.sh",
+          "undo": "/opt/cloud-desktop-host/scripts/sunshine-undo-desktop.sh"
+        }
+      ]
+    }
+  ]
+}

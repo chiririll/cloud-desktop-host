@@ -1,6 +1,6 @@
 # Архитектура cloud-desktop-host (CDH)
 
-> **Версия:** 0.1.0 · **Язык:** C++17 · **Сборка:** Meson + Ninja · **Ядро:** wlroots 0.18.3
+> **Версия:** 0.1.0 · **Язык:** C++17 · **Сборка:** Meson + Ninja · **Ядро:** wlroots 0.20.2
 
 ---
 
@@ -98,7 +98,7 @@ cloud-desktop-host/
 ├── configs/
 │   └── sunshine/apps.json         # два профиля Sunshine: Desktop + Steam Deck Mode
 └── subprojects/
-    ├── wlroots/   @ 0.18.3        # git submodule — freedesktop.org
+    ├── wlroots/   @ 0.20.2        # git submodule — freedesktop.org
     ├── gamescope/ @ 3.16.14.5     # git submodule — ValveSoftware
     └── sunshine/  @ v2026.*       # git submodule — LizardByte
 ```
@@ -578,7 +578,7 @@ CDH **не** кодирует видео — его задача обеспеч�
 
 | Зависимость | Версия | Источник | Назначение |
 |-------------|--------|----------|------------|
-| **wlroots** | 0.18.3 | submodule | Compositor library |
+| **wlroots** | 0.20.2 | submodule | Compositor library |
 | wayland-server | — | system | Wayland server protocol |
 | wayland-protocols | ≥ 1.35 | system | XML protocol definitions |
 | glesv2 | — | system | GLES2 рендерер |

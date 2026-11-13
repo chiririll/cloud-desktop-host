@@ -1,6 +1,4 @@
 build
 dist
 .git
-subprojects/sunshine
-subprojects/gamescope
 **/.git

@@ -13,7 +13,7 @@
                                    │  wlr_screencopy / wayland-cd
   ┌────────────────────────────────┴─────────────────────────────────┐
   │  cloud-desktop-host (CDH)      headless Wayland compositor       │
-  │  wlroots 0.18.3 · GLES2 · GBM allocator · D-Bus gamescope.Input │
+  │  wlroots 0.20.2 · GLES2 · GBM allocator · D-Bus gamescope.Input │
   └──────┬────────────────────────────────────────────────┬──────────┘
          │  wayland-cd                                    │  wayland-cd
   ┌──────┴──────────┐                            ┌────────┴──────────┐
@@ -53,7 +53,7 @@ CDH решает это элегантно: создаёт **виртуальн�
 
 ## Архитектура: что внутри CDH
 
-CDH — это около **двух тысяч строк C++17** на базе [wlroots 0.18.3](https://gitlab.freedesktop.org/wlroots/wlroots). Основные авторские решения:
+CDH — это около **двух тысяч строк C++17** на базе [wlroots 0.20.2](https://gitlab.freedesktop.org/wlroots/wlroots). Основные авторские решения:
 
 ### Headless output без DRM
 
@@ -131,7 +131,7 @@ cloud-desktop-host/
 │   └── sunshine/apps.json       # два профиля: Desktop + Steam Deck Mode
 ├── meson.build                  # сборка CDH
 └── subprojects/
-    ├── wlroots/   @ 0.18.3      # git submodule — freedesktop.org
+    ├── wlroots/   @ 0.20.2      # git submodule — freedesktop.org
     ├── gamescope/ @ 3.16.14.5   # git submodule — ValveSoftware
     └── sunshine/  @ v2026.*     # git submodule — LizardByte
 ```
@@ -198,7 +198,7 @@ ninja -C build
 
 | Субмодуль | Upstream | Версия |
 |-----------|----------|--------|
-| `subprojects/wlroots` | [freedesktop.org](https://gitlab.freedesktop.org/wlroots/wlroots) | 0.18.3 |
+| `subprojects/wlroots` | [freedesktop.org](https://gitlab.freedesktop.org/wlroots/wlroots) | 0.20.2 |
 | `subprojects/gamescope` | [ValveSoftware](https://github.com/ValveSoftware/gamescope) | 3.16.14.5 |
 | `subprojects/sunshine` | [LizardByte](https://github.com/LizardByte/Sunshine) | v2026.* |
 

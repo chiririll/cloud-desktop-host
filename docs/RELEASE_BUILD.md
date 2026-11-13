@@ -35,7 +35,7 @@ The binary links against the Fedora release it was built on, so build it for the
 ### What the Dockerfile does
 
 1. Starts from `fedora:${FEDORA}` and installs only the build dependencies (meson, gcc, wayland/libinput/mesa/xkbcommon/pixman/systemd `-devel`).
-2. Builds wlroots 0.18.3 from `subprojects/wlroots` as a **static** library, so there is no `libwlroots-0.18.so` to install.
+2. Builds wlroots 0.20.2 from `subprojects/wlroots` as a **static** library, so there is no `libwlroots-0.20.so` to install.
 3. Builds wlroots with **only the headless parts**:
 
    | wlroots option | Value | Why |

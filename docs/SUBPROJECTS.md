@@ -6,7 +6,7 @@ GitHub **не имеет отдельного типа «Meson subproject»**. �
 
 | Submodule | URL upstream | Зафиксированная версия (тег) |
 |-----------|--------------|------------------------------|
-| `subprojects/wlroots` | https://gitlab.freedesktop.org/wlroots/wlroots.git | **0.18.3** |
+| `subprojects/wlroots` | https://gitlab.freedesktop.org/wlroots/wlroots.git | **0.20.2** |
 | `subprojects/gamescope` | https://github.com/ValveSoftware/gamescope.git | **3.16.14.5** |
 | `subprojects/sunshine` | https://github.com/LizardByte/Sunshine.git | **v2026.403.124357** (см. `git submodule status`) |
 
@@ -46,10 +46,10 @@ git submodule update --init --recursive
 ```bash
 cd subprojects/wlroots
 git fetch origin
-git checkout 0.18.3   # или другой тег/коммит
+git checkout 0.20.2   # или другой тег/коммит
 cd ../..
 git add subprojects/wlroots
-git commit -m "Bump wlroots to 0.18.3"
+git commit -m "Bump wlroots to 0.20.2"
 ```
 
 Аналогично для Gamescope и Sunshine. После обновления **обязательно** пересоберите CDH и проверьте совместимость API wlroots; для Sunshine выполните `git submodule update --init --recursive` внутри `subprojects/sunshine`.
