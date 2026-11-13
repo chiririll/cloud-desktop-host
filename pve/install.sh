@@ -773,8 +773,8 @@ do_guard_loaded()  { modprobe cdh_input_guard; }
 phase_guard() {
   [[ $INSTALL_INPUT_GUARD != 0 ]] || return 0
   header "Input guard (kernel $GUARD_KVER)"
-  step "cdh_input_guard.ko for this kernel" chk_guard_file "$GUARD_KO_NAME" "$GUARD_KO"
-  step "udev rule $GUARD_RULE_NAME" chk_guard_file "$GUARD_RULE_NAME" "$GUARD_RULE"
+  step "cdh_input_guard.ko for this kernel" "chk_guard_file $GUARD_KO_NAME $GUARD_KO" "do_guard_file $GUARD_KO_NAME $GUARD_KO"
+  step "udev rule $GUARD_RULE_NAME" "chk_guard_file $GUARD_RULE_NAME $GUARD_RULE" "do_guard_file $GUARD_RULE_NAME $GUARD_RULE"
   step "cdh_input_guard loaded" chk_guard_loaded do_guard_loaded
   if grep -qsxF cdh_input_guard "$GUARD_LOAD"; then
     msg_ok "cdh_input_guard loaded at boot"
