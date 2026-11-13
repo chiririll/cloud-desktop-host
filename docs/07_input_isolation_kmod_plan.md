@@ -1,6 +1,6 @@
 # Input isolation: kernel module plan
 
-Status: plan. Nothing here is implemented. The module design comes from reading the kernel input core, not from a build. Items marked **unverified** must be confirmed in phase 1 before anything else is built on them.
+Status: phases 1 and 2 are implemented. The module is in `../cdh-input-guard/`; `pve/install.sh` installs it and sets up the per-container `/dev/input` (`pve/install-parts/74-phase-guard.sh`, described in [PVE_INSTALLER.md](PVE_INSTALLER.md)). Phase 2 is tested only against a fake sysfs, not yet with two running containers. Of phase 0 the installer does only the logind udev rule; the Ctrl+Alt+Del mask and `kernel.sysrq = 0` are still manual. Phase 3 (DKMS) is open. Items marked **unverified** below are from the planning stage; the module README lists what has been confirmed since.
 
 This replaces the "Options" and "Proposed order" sections of [06_input_isolation_plan.md](06_input_isolation_plan.md). The problem description there still stands.
 
@@ -61,16 +61,17 @@ Limits to accept:
 
 Today every container bind-mounts the host's whole `/dev/input`, and one udev rule gives every virtual device the same owner. The rule file holds a single uid, so installing a second container whose user has a different uid breaks input in the first.
 
-New layout:
+New layout (as built; it differs from the first plan in one point: the directory is under `/dev`, not `/run`, because `/run` is mounted `nodev` and device nodes there cannot be opened):
 
-- Host directory `/run/cdh/input/<ctid>/`, created by a `tmpfiles.d` entry so it exists before the container starts.
+- Host directory `/dev/cdh-input/<ctid>/`, root-owned, created by a `tmpfiles.d` entry so it exists before the container starts.
 - Container config: replace `lxc.mount.entry: /dev/input dev/input …` in `pve/install-parts/71-phase-container.sh` with a bind mount of that directory. Keep `lxc.cgroup2.devices.allow: c 13:* rwm`. The installer must also remove the old line from existing containers; `missing_raw` only adds lines.
-- Udev rule replacing `60-lxc-virtual-input.rules` in `pve/install-parts/72-phase-inside.sh`. For each `event*` and `js*` node of a device that has the owner attribute, it runs a helper.
-- Helper `cdh-input-node add|remove`:
+- Udev rule `72-cdh-input-node.rules`, replacing `60-lxc-virtual-input.rules`. For each `event*` and `js*` node of a virtual device it runs a helper on `add`, `change` and `remove`. The old rule stays as long as some container still mounts the host's `/dev/input`.
+- Helper `cdh-input-node add|remove|sync`:
   - Reads the cgroup path from sysfs itself and extracts the container id from a match of `^/lxc/([0-9]+)/` at the start. The rest of the path is named by the container and may contain spaces or a segment like `lxc/102`, so it must not go through `$attr{}` substitution in the udev rule, and a path that does not match is ignored.
-  - Reads the owner uid for that container from a per-container file written by the installer (`100000 + uid`).
+  - Reads the owner uid for that container from `/etc/cdh-input/<ctid>.uid`, written by the installer (`100000 + uid`).
   - Creates the node under a temporary name, sets owner and mode `0600`, then renames it to `eventN`. CDH's inotify watch already handles `IN_MOVED_TO` and ignores names that do not start with `event`.
-  - On `remove`, deletes the node.
+  - On `add`, first deletes a node of the same name from every other container's directory. The kernel reuses names and minors, so a leftover node would open the new device.
+  - On `remove`, deletes the node. `sync` brings every directory in line with sysfs; the installer runs it.
 
 The container cannot create device nodes itself and sees only its own, so it cannot open another container's keyboard, mouse or gamepad.
 

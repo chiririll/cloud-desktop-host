@@ -27,7 +27,8 @@
 #   CDH_VERSION=v1.0.0   use this release (default: local dist/, else latest)
 #   CDH_GH_REPO=chiririll/cloud-desktop-host   SUNSHINE_RPM=<url or local .rpm>
 #   CLOUD_MOUSE_RPM=<url or local .rpm>   (default: latest kcm-cloud-mouse release for the Fedora version, skipped with a warning if there is none; "none" to skip)
-#   INSTALL_INPUT_GUARD=0   don't install the cdh_input_guard host kernel module (default 1)
+#   INSTALL_INPUT_GUARD=0   don't install the cdh_input_guard host kernel module (default 1).
+#                     Without it the CT shares the host's /dev/input with every other such CT.
 #   CDH_GUARD_REPO, CDH_GUARD_VERSION   where the module release comes from
 #   CSRF_EXTRA=https://gaming.example.org   extra Sunshine web UI origins
 set -euo pipefail

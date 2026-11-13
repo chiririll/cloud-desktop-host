@@ -24,11 +24,19 @@ do_nesting()  { pct set "$CTID" --features nesting=1,fuse=1; }
 chk_running() { ct_up; }
 do_running()  { pct start "$CTID"; sleep 5; }
 
+# The CT's /dev/input: its own directory, filled by the host with the devices the CT
+# created (74-phase-guard.sh). Without the input guard nobody knows who created a
+# device, so the CT gets the host's /dev/input, which every such CT shares.
+input_mount() {
+  if input_isolated; then echo "lxc.mount.entry: $INPUT_ROOT/$CTID dev/input none bind,create=dir"
+  else echo "lxc.mount.entry: /dev/input dev/input none bind,optional,create=dir"; fi
+}
+
 # raw lxc.* keys, kept in the main section (before any [snapshot])
 raw_lines() {
   cat <<EOF
 lxc.cgroup2.devices.allow: c 13:* rwm
-lxc.mount.entry: /dev/input dev/input none bind,optional,create=dir
+$(input_mount)
 lxc.mount.entry: /run/udev mnt/host-udev none bind,ro,optional,create=dir
 lxc.cap.drop:
 lxc.cap.drop: mac_admin mac_override sys_module sys_pacct sys_rawio sys_time
@@ -37,9 +45,25 @@ EOF
 }
 main_conf() { sed -e '/^\[/,$d' -e 's/[[:space:]]*$//' "$CONF"; }   # pve may keep "key: " with a trailing space
 missing_raw() { local l; while IFS= read -r l; do main_conf | grep -qxF "$l" || echo "$l"; done < <(raw_lines); }
-chk_raw() { local m; m=$(missing_raw); [[ -z $m ]] || { sed 's/^/missing: /' <<<"$m"; return 1; }; }
+# a /dev/input mount entry other than input_mount: it would be mounted as well
+stale_input_mounts() {
+  main_conf | grep -E '^lxc\.mount\.entry: [^ ]+ dev/input ' | grep -vxF "$(input_mount)"
+  return 0
+}
+chk_raw() {
+  local m s; m=$(missing_raw); s=$(stale_input_mounts)
+  [[ -z $m && -z $s ]] && return 0
+  [[ -z $m ]] || sed 's/^/missing: /' <<<"$m"
+  [[ -z $s ]] || sed 's/^/to remove: /' <<<"$s"
+  return 1
+}
 do_raw() {
-  local add tmp; add=$(missing_raw)
+  local add tmp
+  # drops the wanted entry too if it is there; missing_raw puts it back
+  if [[ -n $(stale_input_mounts) ]]; then
+    sed -i -E '1,/^\[/{/^lxc\.mount\.entry: [^ ]+ dev\/input /d}' "$CONF"   # main section only
+  fi
+  add=$(missing_raw)
   # "lxc.cap.drop:" (reset) must come right before the explicit list
   if grep -q '^lxc.cap.drop: mac_admin' <<<"$add" || grep -qx 'lxc.cap.drop:' <<<"$add"; then
     sed -i '1,/^\[/{/^lxc\.cap\.drop:/d}' "$CONF"   # main section only
@@ -104,10 +128,13 @@ phase_container() {
 
   step "features nesting=1 (Steam bubblewrap)" chk_nesting do_nesting
   restart_if_applied
+  # before the CT starts: its config may already mount this directory
+  if input_isolated; then step "input directory $INPUT_ROOT/$CTID" chk_input_dir do_input_dir; fi
   step "CT running" chk_running do_running
   step "lxc.conf: input bind, host udev, caps, /dev/shm" chk_raw do_raw
   restart_if_applied
   step "CT user '$CT_USER' (video,render,input,wheel)" chk_user do_user
+  if input_isolated; then step "input devices of CT $CTID owned by '$CT_USER'" chk_input_owner do_input_owner; fi
   step "GPU/uinput passthrough ($(drm_node card 2>/dev/null), $(drm_node renderD 2>/dev/null))" chk_devs do_devs
   restart_if_applied
 

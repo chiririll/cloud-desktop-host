@@ -6,7 +6,9 @@ do_udevdb() {
   ct_sh 'mountpoint -q /run/udev && ls /run/udev/data >/dev/null 2>&1 || mount /run/udev'
 }
 
-# Sunshine's virtual input devices must be owned by the CT user's uid as seen from the host
+# Sunshine's virtual input devices must be owned by the CT user's uid as seen from the host.
+# With the input guard the CT has its own /dev/input and cdh-input-node sets the owner
+# (74-phase-guard.sh); this rule is only for CTs on the host's shared /dev/input.
 INPUT_RULE=/etc/udev/rules.d/60-lxc-virtual-input.rules
 host_uid() { local u; u=$(ct id -u "$CT_USER" 2>/dev/null) || u=''; echo $((100000 + ${u:-1000})); }
 input_rule_txt() { echo "SUBSYSTEM==\"input\", KERNEL==\"event*\", DEVPATH==\"/devices/virtual/input/*\", OWNER=\"$(host_uid)\", MODE=\"0600\""; }
@@ -107,7 +109,8 @@ phase_steam() {
 phase_inside() {
   header "Inside the container"
   step "host udev db at /run/udev" chk_udevdb do_udevdb
-  step "host udev rule: Sunshine virtual input → host uid $(host_uid)" chk_inrule do_inrule
+  if input_isolated; then phase_shared_input_rule
+  else step "host udev rule: Sunshine virtual input → host uid $(host_uid)" chk_inrule do_inrule; fi
   step "packages (KWin, Plasma, PipeWire, Xwayland…)" chk_pkgs do_pkgs
   step "NVIDIA userspace $(host_driver || true) (matches host)" chk_nvuser do_nvuser
   require "nvidia-smi works in CT" chk_smi "check devN entries and driver version, see $LOG"
