@@ -77,6 +77,7 @@ struct cd_server {
     struct wl_listener          active_constraint_destroy;
     bool                        has_active_constraint;  /* locked pointer активен */
     bool                        pointer_lock_sent;      /* RIGHT_CTRL отправлен */
+    bool                        abs_synced;             /* absolute-mouse origin synced with KWin's locked cursor */
     struct wl_event_source     *pointer_lock_timer;
 
     /* ── Pointer position (для seat notify_motion) ── */

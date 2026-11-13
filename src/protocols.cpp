@@ -146,6 +146,7 @@ void cd_register_protocols(struct cd_server *server) {
         wlr_log(WLR_INFO, "New Pointer constraint request (LOCKED mode initiated)");
         server->hud_constraint_count++;
         server->has_active_constraint = true;
+        server->abs_synced = false;
         server->hud_pointer_locked = true;
 
         // Удаляем старый листенер, если он был (для страховки)

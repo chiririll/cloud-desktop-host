@@ -127,6 +127,23 @@ static void handle_pointer_motion_abs(struct cd_server *server,
     double dx = x - server->cursor_x;
     double dy = y - server->cursor_y;
 
+    /* KWin tracks the locked cursor itself, from an unknown start position.
+     * Once per lock, pin it to (0,0) with an oversized negative delta (KWin
+     * clamps to the screen) so that our deltas and KWin's position agree. */
+    if (server->has_active_constraint && !server->abs_synced && server->relative_pointer_mgr) {
+        uint64_t t_usec = (uint64_t)libinput_event_pointer_get_time_usec(pe);
+        double big_x = -2.0 * server->cur_width;
+        double big_y = -2.0 * server->cur_height;
+        wlr_relative_pointer_manager_v1_send_relative_motion(
+            server->relative_pointer_mgr, server->seat,
+            t_usec, big_x, big_y, big_x, big_y);
+        server->cursor_x = 0;
+        server->cursor_y = 0;
+        dx = x;
+        dy = y;
+        server->abs_synced = true;
+    }
+
     server->cursor_x = x;
     server->cursor_y = y;
     clock_gettime(CLOCK_MONOTONIC, &server->last_mouse_activity_time);

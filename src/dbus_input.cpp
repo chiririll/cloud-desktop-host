@@ -554,6 +554,7 @@ static int method_set_output_mode(
     server->cur_width = width;
     server->cur_height = height;
     server->cur_refresh = refresh_mhz;
+    server->abs_synced = false;  /* re-sync absolute mouse origin after mode change */
 
     /* 3. xdg_toplevel resize для KWin */
     if (server->desktop_toplevel) {
