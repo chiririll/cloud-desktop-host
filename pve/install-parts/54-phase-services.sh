@@ -25,6 +25,7 @@ phase_summary() {
   echo
   if ((CHECK_ONLY)); then
     if ((NEEDED)); then echo "${YW}$NEEDED step(s) needed.${CL} Run without --check to apply."
+    elif ((SKIPPED)); then echo "${YW}Nothing needed in what could be checked,${CL} but the CT itself was not checked: see the warning above."
     else echo "${GN}Everything is in place.${CL}"; fi
     return 0
   fi

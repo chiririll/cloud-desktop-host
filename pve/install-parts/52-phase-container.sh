@@ -119,10 +119,17 @@ do_devs() {
   done <<<"$want"
 }
 
+# --check can't look inside a CT that is missing or stopped: say so, instead of a pile of failures
+skip_rest() {
+  msg_warn "$1: the remaining steps can't be checked (run without --check to create/start it)"
+  SKIPPED=1
+}
+
 phase_container() {
   header "Container $CTID${CT_NAME:+ ($CT_NAME)}"
   step "Fedora $FEDORA template" chk_template do_template
   step "CT exists" chk_ct do_ct
+  if ((CHECK_ONLY)) && ! chk_ct; then skip_rest "CT $CTID does not exist yet"; return 0; fi
   require "CT is unprivileged (default idmap)" chk_unpriv \
     "CT $CTID is privileged or uses a custom lxc.idmap; this script assumes uid shift 100000"
 
@@ -133,6 +140,8 @@ phase_container() {
   step "CT running" chk_running do_running
   step "lxc.conf: input bind, host udev, caps, /dev/shm" chk_raw do_raw
   restart_if_applied
+  if ((CHECK_ONLY)) && ! ct_up; then skip_rest "CT $CTID is not running"; return 0; fi
+
   step "CT user '$CT_USER' (video,render,input,wheel)" chk_user do_user
   if input_isolated; then step "input devices of CT $CTID owned by '$CT_USER'" chk_input_owner do_input_owner; fi
   step "GPU/uinput passthrough ($(drm_node card 2>/dev/null), $(drm_node renderD 2>/dev/null))" chk_devs do_devs

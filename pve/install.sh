@@ -238,6 +238,7 @@ BUNDLE_TMP=''    # temp dir of the downloaded bundle, removed on exit
 NEEDED=0         # steps still needed (--check)
 RESTART_CT=0     # a step changed the CT config: restart before going inside
 APPLIED=0        # set by step() when it changed something
+SKIPPED=0        # --check could not look inside the CT (missing / stopped), see skip_rest()
 
 usage() { local IFS='|'; echo "usage: install.sh [--check] [--fedora ${SUPPORTED_FEDORA[*]}]   (settings: see the script header)"; }
 
@@ -532,6 +533,35 @@ resolve_ctid() {
   CONF=/etc/pve/lxc/$CTID.conf
 }
 
+# ── checks before anything is asked or changed ────────────────
+preflight() {
+  local c missing=()
+  [[ $EUID -eq 0 ]] || die "run as root on the Proxmox host"
+  for c in pct pveam pvesm pvesh qm curl tar sha256sum awk sed flock udevadm modprobe; do
+    command -v "$c" >/dev/null || missing+=("$c")
+  done
+  ((${#missing[@]} == 0)) || die "missing on the host: ${missing[*]} (is this a Proxmox VE host?)"
+
+  [[ $CT_USER =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "CT_USER '$CT_USER' is not a valid user name"
+  [[ $SHM_SIZE =~ ^[0-9]+[KMG]?$ ]] || die "SHM_SIZE must look like 4G, got '$SHM_SIZE'"
+  [[ -z $NVIDIA_PCI || $NVIDIA_PCI =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]] \
+    || die "NVIDIA_PCI must look like 0000:01:00.0, got '$NVIDIA_PCI'"
+  [[ $INSTALL_INPUT_GUARD =~ ^[01]$ ]] || die "INSTALL_INPUT_GUARD must be 1 or 0, got '$INSTALL_INPUT_GUARD'"
+  pvesm status 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$TEMPLATE_STORAGE" \
+    || die "TEMPLATE_STORAGE '$TEMPLATE_STORAGE' is not a Proxmox storage"
+}
+
+# values from the environment skip ask(): validate them before a CT is created
+validate_new_ct() {
+  local n
+  for n in CT_DISK CT_CORES CT_MEMORY; do
+    [[ ${!n} =~ ^[0-9]+$ ]] || die "$n must be a number, got '${!n}'"
+  done
+  pvesm status -content rootdir 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$CT_STORAGE" \
+    || die "CT_STORAGE '$CT_STORAGE' is not a storage that can hold container disks"
+  [[ -d /sys/class/net/$CT_BRIDGE ]] || die "network bridge '$CT_BRIDGE' does not exist on this host"
+}
+
 # existing CT → confirm; free ID → ask creation settings and confirm
 resolve_ct() {
   if pct status "$CTID" >/dev/null 2>&1; then
@@ -561,6 +591,7 @@ resolve_new_ct() {
   ask CT_MEMORY   "Memory, MB"       16384             '^[0-9]+$'
   ask CT_BRIDGE   "Network bridge"   vmbr0             '^[A-Za-z0-9_.-]+$'
   resolve_ct_network
+  validate_new_ct
 
   confirm "Create CT $CTID '$CT_HOSTNAME' on $CT_STORAGE (${CT_DISK} GB, $CT_CORES cores, $CT_MEMORY MB, $CT_BRIDGE, ip $CT_IP${CT_GATEWAY:+ via $CT_GATEWAY})?" \
     || die "aborted"
@@ -924,10 +955,17 @@ do_devs() {
   done <<<"$want"
 }
 
+# --check can't look inside a CT that is missing or stopped: say so, instead of a pile of failures
+skip_rest() {
+  msg_warn "$1: the remaining steps can't be checked (run without --check to create/start it)"
+  SKIPPED=1
+}
+
 phase_container() {
   header "Container $CTID${CT_NAME:+ ($CT_NAME)}"
   step "Fedora $FEDORA template" chk_template do_template
   step "CT exists" chk_ct do_ct
+  if ((CHECK_ONLY)) && ! chk_ct; then skip_rest "CT $CTID does not exist yet"; return 0; fi
   require "CT is unprivileged (default idmap)" chk_unpriv \
     "CT $CTID is privileged or uses a custom lxc.idmap; this script assumes uid shift 100000"
 
@@ -938,6 +976,8 @@ phase_container() {
   step "CT running" chk_running do_running
   step "lxc.conf: input bind, host udev, caps, /dev/shm" chk_raw do_raw
   restart_if_applied
+  if ((CHECK_ONLY)) && ! ct_up; then skip_rest "CT $CTID is not running"; return 0; fi
+
   step "CT user '$CT_USER' (video,render,input,wheel)" chk_user do_user
   if input_isolated; then step "input devices of CT $CTID owned by '$CT_USER'" chk_input_owner do_input_owner; fi
   step "GPU/uinput passthrough ($(drm_node card 2>/dev/null), $(drm_node renderD 2>/dev/null))" chk_devs do_devs
@@ -1103,6 +1143,7 @@ phase_summary() {
   echo
   if ((CHECK_ONLY)); then
     if ((NEEDED)); then echo "${YW}$NEEDED step(s) needed.${CL} Run without --check to apply."
+    elif ((SKIPPED)); then echo "${YW}Nothing needed in what could be checked,${CL} but the CT itself was not checked: see the warning above."
     else echo "${GN}Everything is in place.${CL}"; fi
     return 0
   fi
@@ -1126,8 +1167,7 @@ main() {
   parse_args "$@"
   trap 'rm -rf "${BUNDLE_TMP:-}"' EXIT
 
-  [[ $EUID -eq 0 ]] || die "run as root on the Proxmox host"
-  command -v pct >/dev/null || die "pct not found: this must run on a Proxmox VE host"
+  preflight
   if ((CHECK_ONLY)); then echo "${YW}check mode: nothing will be changed${CL}"; fi
 
   resolve_ctid
@@ -1138,8 +1178,10 @@ main() {
   phase_host
   phase_guard
   phase_container
-  phase_inside
-  phase_services
+  if ((!SKIPPED)); then   # --check with a missing/stopped CT: nothing to look at inside
+    phase_inside
+    phase_services
+  fi
   phase_summary
 }
 

@@ -50,6 +50,7 @@ BUNDLE_TMP=''    # temp dir of the downloaded bundle, removed on exit
 NEEDED=0         # steps still needed (--check)
 RESTART_CT=0     # a step changed the CT config: restart before going inside
 APPLIED=0        # set by step() when it changed something
+SKIPPED=0        # --check could not look inside the CT (missing / stopped), see skip_rest()
 
 usage() { local IFS='|'; echo "usage: install.sh [--check] [--fedora ${SUPPORTED_FEDORA[*]}]   (settings: see the script header)"; }
 
