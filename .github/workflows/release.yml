@@ -17,11 +17,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        fedora: ["43", "44", "45"]   # keep in sync with SUPPORTED_FEDORA in pve/install.sh
+        fedora: ["43", "44", "45"]   # keep in sync with SUPPORTED_FEDORA in pve/install-parts/10-config.sh
     env:
       FEDORA: ${{ matrix.fedora }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check pve/install.sh is built from pve/install-parts
+        run: pve/build.sh --check
 
       - name: Fetch wlroots submodule only
         run: git submodule update --init --depth 1 subprojects/wlroots

@@ -34,7 +34,7 @@ From a checkout:
 The script first asks which container to use. It lists the existing CTs and suggests the next free ID:
 
 - **An existing CT ID:** it asks for confirmation, because the CT's config may change and the CT may be restarted.
-- **A free ID:** it asks for hostname, storage, disk, cores, memory and bridge (Enter accepts the default), then confirms before creating the CT.
+- **A free ID:** it asks for hostname, storage, disk, cores, memory, bridge and IP (`dhcp` or static + gateway) (Enter accepts the default), then confirms before creating the CT.
 
 With `--check` it only asks for the ID, and changes nothing.
 
@@ -99,7 +99,9 @@ CTID=181 YES=1 bash -c "$(curl -fsSL …/pve/install.sh)"     # no questions at 
 | `CT_DISK` | asked, `64` | rootfs size in GB (creation only) |
 | `CT_CORES` | asked, `8` | creation only |
 | `CT_MEMORY` | asked, `16384` | MB, creation only |
-| `CT_BRIDGE` | asked, `vmbr0` | `net0` bridge, DHCP (creation only) |
+| `CT_BRIDGE` | asked, `vmbr0` | `net0` bridge (creation only) |
+| `CT_IP` | asked, `dhcp` | `dhcp`, or a static address in CIDR form, e.g. `192.168.1.50/24` (creation only) |
+| `CT_GATEWAY` | asked, host default route | gateway for a static `CT_IP` (creation only) |
 | `TEMPLATE_STORAGE` | `local` | where the Fedora template is downloaded |
 | `FEDORA` / `--fedora N` | asked for a new CT (default `43`); detected for a running existing CT | `43`, `44` or `45`: template version and release bundle |
 | `CT_USER` | `user` | desktop user inside the CT |
@@ -253,3 +255,25 @@ All command output goes to `/var/log/cdh-lxc-install.log` on the host, with a `=
 | `nvidia-smi works in CT` fails | passthrough is missing, the CT wasn't restarted, or the host and CT driver versions differ |
 
 For the background on each step (why the bind goes through `/mnt/host-udev`, why `sys_nice` is needed, the `AT_SECURE` bug), see the step-by-step guide this script automates.
+
+---
+
+## Development
+
+`pve/install.sh` is **generated**: it has to stay one self-contained file because it is run as `bash -c "$(curl …)"`. The source lives in `pve/install-parts/*.sh`, concatenated in name order by `pve/build.sh`.
+
+| Part | Contents |
+|---|---|
+| `00-header` | usage comment, `set -euo pipefail` |
+| `10-config` | settings, defaults, runtime globals, `parse_args` |
+| `20-ui` | output helpers, `ask`/`confirm` |
+| `30-step` | the `step` / `require` engine |
+| `40-ct` | `ct*` helpers, `ct_install_rpm`, `chk_nocaps`, GPU discovery |
+| `50-release` | release bundle download/verify, `phase_bundle` |
+| `60-resolve` | which CT, which Fedora, options |
+| `70`–`73-phase-*` | one `phase_*` function per stage: host, container, inside the CT, user service |
+| `90-main` | `main`: the order of the phases |
+
+To add a step, write its `chk_*` / `do_*` functions in the matching phase part and call `step` from that phase's `phase_*` function. For a new stage, add `NN-phase-<name>.sh` and one line in `90-main.sh`.
+
+After editing a part, run `pve/build.sh` and commit `install.sh` together with it. `pve/build.sh --check` (run in CI) fails if they are out of sync.

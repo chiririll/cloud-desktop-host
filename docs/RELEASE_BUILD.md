@@ -133,4 +133,4 @@ tar -xzf cdh-fc43-x86_64.tar.gz      # → cdh/
 
 ### Supporting another Fedora release
 
-Add the number to `strategy.matrix.fedora` in the workflow and to `SUPPORTED_FEDORA` in `pve/install.sh`. Sunshine publishes RPMs for each release too, so check that its `fc<N>` asset exists first. For a local build: `docker build --build-arg FEDORA=44 -o dist .`
+Add the number to `strategy.matrix.fedora` in the workflow and to `SUPPORTED_FEDORA` in `pve/install-parts/10-config.sh` (then run `pve/build.sh`). Sunshine publishes RPMs for each release too, so check that its `fc<N>` asset exists first. For a local build: `docker build --build-arg FEDORA=44 -o dist .`
