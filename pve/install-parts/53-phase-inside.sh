@@ -15,7 +15,14 @@ chk_inrule() { [[ "$(cat $INPUT_RULE 2>/dev/null)" == "$(input_rule_txt)" ]]; }
 do_inrule()  { input_rule_txt >$INPUT_RULE; udevadm control --reload; }
 
 chk_pkgs() { rpm_missing "${CT_PACKAGES[@]}"; }
-do_pkgs()  { ct dnf install -y "${CT_PACKAGES[@]}"; }
+# Some %post scriptlets (udisks2: `udevadm trigger` -> EACCES on /sys/.../uevent in a CT) exit non-zero even
+# though every package is installed, and dnf5 then reports "Rpm transaction failed". So dnf's exit code is
+# not the verdict: step() re-runs chk_pkgs (rpm -q) afterwards and fails if something is really missing.
+do_pkgs() {
+  local rc=0
+  ct dnf install -y "${CT_PACKAGES[@]}" || rc=$?
+  ((rc == 0)) || echo "dnf exited $rc (usually a CT-hostile %post scriptlet), verifying with rpm -q"
+}
 
 chk_nvuser() { local drv; drv=$(host_driver) && [[ -n $drv ]] && ct test -e "/usr/lib64/libnvidia-glcore.so.$drv"; }
 do_nvuser() {
