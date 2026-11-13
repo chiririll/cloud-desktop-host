@@ -7,7 +7,7 @@
 #
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/chiririll/cloud-desktop-host/main/pve/install.sh)" -- --check
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/chiririll/cloud-desktop-host/main/pve/install.sh)"
-#   ./pve/install.sh [--check]        # from a checkout
+#   ./pve/install.sh [--check] [--fedora 44]   # from a checkout
 #
 # Every step: check → (apply if needed) → check again. Safe to re-run any time,
 # e.g. after a host driver update or when /dev/dri/cardN got renumbered.
@@ -17,13 +17,15 @@
 #
 # Settings (env vars, all optional when run interactively):
 #   CTID  CT_HOSTNAME  CT_STORAGE  CT_DISK  CT_CORES  CT_MEMORY  CT_BRIDGE
-#   TEMPLATE_STORAGE=local  FEDORA=43  CT_USER=user  SHM_SIZE=4G
+#   TEMPLATE_STORAGE=local  CT_USER=user  SHM_SIZE=4G
+#   FEDORA=43|44|45   Fedora release of the CT (same as --fedora; asked when creating a CT,
+#                     an existing running CT is detected). Must have a release bundle.
 #   INSTALL_STEAM=1|0   Steam + Gamescope + MangoHud (asked; default yes without a tty)
 #   YES=1   don't ask for confirmation before changing an existing CT
 #   NVIDIA_PCI=0000:01:00.0   pick the GPU if there are several NVIDIA cards
 #   CDH_VERSION=v1.0.0   use this release (default: local dist/, else latest)
 #   CDH_GH_REPO=chiririll/cloud-desktop-host   SUNSHINE_RPM=<url or local .rpm>
-#   CLOUD_MOUSE_RPM=<url or local .rpm>   (default: latest kcm-cloud-mouse release; "none" to skip)
+#   CLOUD_MOUSE_RPM=<url or local .rpm>   (default: latest kcm-cloud-mouse release for the Fedora version, skipped with a warning if there is none; "none" to skip)
 #   CSRF_EXTRA=https://gaming.example.org   extra Sunshine web UI origins
 set -euo pipefail
 
@@ -36,7 +38,9 @@ CT_MEMORY=${CT_MEMORY:-}
 CT_BRIDGE=${CT_BRIDGE:-}
 YES=${YES:-0}
 TEMPLATE_STORAGE=${TEMPLATE_STORAGE:-local}
-FEDORA=${FEDORA:-43}
+FEDORA=${FEDORA:-}
+SUPPORTED_FEDORA=(43 44 45)   # keep in sync with the matrix in .github/workflows/release.yml
+DEFAULT_FEDORA=43
 CT_USER=${CT_USER:-user}
 INSTALL_STEAM=${INSTALL_STEAM:-}
 SHM_SIZE=${SHM_SIZE:-4G}
@@ -52,7 +56,8 @@ CDH_BIN=$REPO/dist/cloud-desktop-host
 SUNSHINE_RPM=${SUNSHINE_RPM:-}
 # KDE System Settings → Input Devices → Cloud Mouse (pointer speed etc. over org.gamescope.Input;
 # KWin's own mouse page can't see CDH's input devices)
-CLOUD_MOUSE_RPM=${CLOUD_MOUSE_RPM:-https://github.com/chiririll/kcm-cloud-mouse/releases/latest/download/kcm-cloud-mouse-fc$FEDORA-x86_64.rpm}
+CLOUD_MOUSE_RPM=${CLOUD_MOUSE_RPM:-}   # default is set once FEDORA is known
+CLOUD_MOUSE_DEFAULT=0
 CT_CDH=/opt/cloud-desktop-host   # scripts + configs, root-owned, read-only for the user
 LOG=/var/log/cdh-lxc-install.log
 
@@ -61,12 +66,17 @@ CT_PACKAGES=(dbus-daemon dbus-tools dbus-x11 pipewire wireplumber pipewire-pulse
   xdg-utils kde-cli-tools)
 
 CHECK_ONLY=0
-case "${1:-}" in
-  --check|-n) CHECK_ONLY=1 ;;
-  "") ;;
-  -h|--help) echo "usage: install.sh [--check]   (settings: see the script header)"; exit 0 ;;
-  *) echo "unknown option: $1 (use --check)"; exit 2 ;;
-esac
+usage() { local IFS='|'; echo "usage: install.sh [--check] [--fedora ${SUPPORTED_FEDORA[*]}]   (settings: see the script header)"; }
+while (($#)); do
+  case "$1" in
+    --check|-n) CHECK_ONLY=1 ;;
+    --fedora=*) FEDORA=${1#*=} ;;
+    --fedora|-f) [[ $# -ge 2 ]] || { usage; exit 2; }; FEDORA=$2; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown option: $1"; usage; exit 2 ;;
+  esac
+  shift
+done
 
 # ── output, community-scripts style ────────────────────────────
 if [[ -t 1 ]]; then
@@ -193,7 +203,7 @@ fetch_release() {
   # shellcheck disable=SC2064  # expand now on purpose: tmp is local
   trap "rm -rf '$tmp'" EXIT
   curl -fsSL -o "$tmp/$asset" "$base/$asset" || return 1
-  curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" || return 1
+  curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS-fc$FEDORA" || return 1
   (cd "$tmp" && grep " $asset\$" SHA256SUMS | sha256sum -c --quiet -) || return 1
   tar -C "$tmp" -xzf "$tmp/$asset"
   REPO=$tmp/cdh CDH_BIN=$tmp/cdh/cloud-desktop-host
@@ -234,6 +244,28 @@ elif ((!CHECK_ONLY)); then
   ask CT_MEMORY "Memory, MB" 16384 '^[0-9]+$'
   ask CT_BRIDGE "Network bridge (DHCP)" vmbr0 '^[A-Za-z0-9_.-]+$'
   confirm "Create CT $CTID '$CT_HOSTNAME' on $CT_STORAGE (${CT_DISK} GB, $CT_CORES cores, $CT_MEMORY MB, $CT_BRIDGE)?" || die "aborted"
+fi
+
+# ── which Fedora ──
+is_supported_fedora() { local v; for v in "${SUPPORTED_FEDORA[@]}"; do [[ $v == "$1" ]] && return 0; done; return 1; }
+if [[ -n $ct_name ]] && ct_up; then   # existing running CT: its release decides
+  ct_fedora=$(ct sh -c '. /etc/os-release && [ "$ID" = fedora ] && echo "$VERSION_ID"' 2>/dev/null || true)
+  if [[ -n $ct_fedora ]]; then
+    [[ -z $FEDORA || $FEDORA == "$ct_fedora" ]] || die "CT $CTID runs Fedora $ct_fedora but Fedora $FEDORA was requested (upgrade or recreate the CT first)"
+    FEDORA=$ct_fedora
+  fi
+fi
+if [[ -z $FEDORA ]]; then
+  if [[ -z $ct_name ]] && ((!CHECK_ONLY)); then
+    ask FEDORA "Fedora release (${SUPPORTED_FEDORA[*]})" "$DEFAULT_FEDORA" '^[0-9]+$'
+  else
+    FEDORA=$DEFAULT_FEDORA
+  fi
+fi
+is_supported_fedora "$FEDORA" || die "Fedora '$FEDORA' has no release bundle; supported: ${SUPPORTED_FEDORA[*]}"
+if [[ -z $CLOUD_MOUSE_RPM ]]; then
+  CLOUD_MOUSE_DEFAULT=1
+  CLOUD_MOUSE_RPM=https://github.com/chiririll/kcm-cloud-mouse/releases/latest/download/kcm-cloud-mouse-fc$FEDORA-x86_64.rpm
 fi
 
 if [[ -z $INSTALL_STEAM ]]; then
@@ -502,6 +534,11 @@ do_ssconf() {
 }
 step "Sunshine config (kept if it already exists)" chk_ssconf do_ssconf
 
+# The default RPM is only built for some Fedora releases: skip with a warning instead of failing.
+if ((CLOUD_MOUSE_DEFAULT)) && ! curl -fsIL -o /dev/null "$CLOUD_MOUSE_RPM"; then
+  msg_warn "KCM Cloud Mouse: no fc$FEDORA build in kcm-cloud-mouse releases, skipped (set CLOUD_MOUSE_RPM=<rpm> to install your own)"
+  CLOUD_MOUSE_RPM=none
+fi
 if [[ $CLOUD_MOUSE_RPM != none ]]; then
   chk_cloudmouse() { rpm_missing kcm-cloud-mouse; }
   do_cloudmouse() {

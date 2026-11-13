@@ -1,4 +1,5 @@
 # Push a tag like v0.1.0 → builds the CT bundle and attaches it to a GitHub release.
+# One matrix job per Fedora release; each uploads its own fcNN assets.
 # Asset names carry no version, so .../releases/latest/download/<name> always works.
 name: release
 
@@ -10,12 +11,15 @@ on:
 permissions:
   contents: write
 
-env:
-  FEDORA: "43"
-
 jobs:
   build:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        fedora: ["43", "44", "45"]   # keep in sync with SUPPORTED_FEDORA in pve/install.sh
+    env:
+      FEDORA: ${{ matrix.fedora }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,20 +39,18 @@ jobs:
           tar -C pkg -czf $B.tar.gz cdh
           cp dist/cloud-desktop-host cloud-desktop-host-fc$FEDORA-x86_64
           (cd pkg/cdh && { sha256sum cloud-desktop-host; find scripts configs -type f | sort | xargs sha256sum; }) > MANIFEST-fc$FEDORA
-          sha256sum $B.tar.gz cloud-desktop-host-fc$FEDORA-x86_64 MANIFEST-fc$FEDORA > SHA256SUMS
-          cat SHA256SUMS
+          sha256sum $B.tar.gz cloud-desktop-host-fc$FEDORA-x86_64 MANIFEST-fc$FEDORA > SHA256SUMS-fc$FEDORA
+          cat SHA256SUMS-fc$FEDORA
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          files="cdh-fc$FEDORA-x86_64.tar.gz cloud-desktop-host-fc$FEDORA-x86_64 MANIFEST-fc$FEDORA SHA256SUMS"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" $files --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" $files --generate-notes
-          fi
+          files="cdh-fc$FEDORA-x86_64.tar.gz cloud-desktop-host-fc$FEDORA-x86_64 MANIFEST-fc$FEDORA SHA256SUMS-fc$FEDORA"
+          # matrix jobs run in parallel: whoever is first creates the release, the others upload
+          gh release create "$GITHUB_REF_NAME" $files --generate-notes 2>/dev/null \
+            || gh release upload "$GITHUB_REF_NAME" $files --clobber
 
       - name: Keep artifacts (manual runs)
         if: "!startsWith(github.ref, 'refs/tags/')"
@@ -58,4 +60,4 @@ jobs:
           path: |
             cdh-fc${{ env.FEDORA }}-x86_64.tar.gz
             MANIFEST-fc${{ env.FEDORA }}
-            SHA256SUMS
+            SHA256SUMS-fc${{ env.FEDORA }}

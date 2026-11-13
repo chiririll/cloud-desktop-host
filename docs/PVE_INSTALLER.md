@@ -73,7 +73,7 @@ At the end the script prints the CT's IP, how to start the stack, and the Sunshi
 
 | Situation | Source |
 |---|---|
-| Run via `curl`, or from a checkout without `dist/` | latest GitHub release `cdh-fc$FEDORA-x86_64.tar.gz`, verified against `SHA256SUMS` |
+| Run via `curl`, or from a checkout without `dist/` | latest GitHub release `cdh-fc$FEDORA-x86_64.tar.gz`, verified against `SHA256SUMS-fc$FEDORA` |
 | `CDH_VERSION=v1.0.0` | that release |
 | Run from a checkout that has `dist/cloud-desktop-host` | the local build plus the checkout's `scripts/` and `configs/` |
 
@@ -101,7 +101,7 @@ CTID=181 YES=1 bash -c "$(curl -fsSL …/pve/install.sh)"     # no questions at 
 | `CT_MEMORY` | asked, `16384` | MB, creation only |
 | `CT_BRIDGE` | asked, `vmbr0` | `net0` bridge, DHCP (creation only) |
 | `TEMPLATE_STORAGE` | `local` | where the Fedora template is downloaded |
-| `FEDORA` | `43` | template version, and which release bundle to download |
+| `FEDORA` / `--fedora N` | asked for a new CT (default `43`); detected for a running existing CT | `43`, `44` or `45`: template version and release bundle |
 | `CT_USER` | `user` | desktop user inside the CT |
 | `INSTALL_STEAM` | `1` | `0` skips RPM Fusion, Steam, Gamescope and MangoHud |
 | `SHM_SIZE` | `4G` | size of the CT's `/dev/shm` tmpfs |

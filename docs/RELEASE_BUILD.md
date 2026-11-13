@@ -102,14 +102,15 @@ git push origin v1.0.0
 The workflow:
 
 1. Checks out the repo and fetches only `subprojects/wlroots`.
-2. Runs the same `docker build` as above (`FEDORA` is set in the workflow `env`).
+2. Runs the same `docker build` as above once per Fedora release in the workflow matrix (43, 44, 45).
 3. Packages and uploads these files to the release for that tag (it creates the release if needed, with generated notes):
 
    | Asset | Contents |
    |---|---|
-   | `cdh-fc43-x86_64.tar.gz` | `cdh/cloud-desktop-host`, `cdh/scripts/`, `cdh/configs/`, `cdh/pve/install.sh`, `cdh/pve/host-persist.sh` |
-   | `cloud-desktop-host-fc43-x86_64` | the bare binary |
-   | `SHA256SUMS` | checksums of both |
+   | `cdh-fc<N>-x86_64.tar.gz` | `cdh/cloud-desktop-host`, `cdh/scripts/`, `cdh/configs/`, `cdh/pve/install.sh`, `cdh/pve/host-persist.sh` |
+   | `cloud-desktop-host-fc<N>-x86_64` | the bare binary |
+   | `MANIFEST-fc<N>` | checksums of the binary, scripts and configs (used by `--check`) |
+   | `SHA256SUMS-fc<N>` | checksums of the bundle and the bare binary |
 
 Asset names have no version, so the newest release is always at:
 
@@ -125,11 +126,11 @@ A manual run (**Actions → release → Run workflow**) builds the same files an
 
 ```bash
 base=https://github.com/chiririll/cloud-desktop-host/releases/latest/download
-curl -fLO $base/cdh-fc43-x86_64.tar.gz -fLO $base/SHA256SUMS
-sha256sum -c --ignore-missing SHA256SUMS
+curl -fLO $base/cdh-fc43-x86_64.tar.gz -fLO $base/SHA256SUMS-fc43
+sha256sum -c --ignore-missing SHA256SUMS-fc43
 tar -xzf cdh-fc43-x86_64.tar.gz      # → cdh/
 ```
 
 ### Supporting another Fedora release
 
-Change `FEDORA` in the workflow `env`. To publish several releases at once, turn it into a `strategy.matrix` over Fedora versions. The asset names already include `fc<N>`, and the installer picks `cdh-fc$FEDORA-x86_64.tar.gz`.
+Add the number to `strategy.matrix.fedora` in the workflow and to `SUPPORTED_FEDORA` in `pve/install.sh`. Sunshine publishes RPMs for each release too, so check that its `fc<N>` asset exists first. For a local build: `docker build --build-arg FEDORA=44 -o dist .`
