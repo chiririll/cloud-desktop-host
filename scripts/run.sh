@@ -154,7 +154,7 @@ log "5. KWin"
 WAYLAND_DISPLAY=wayland-cd \
 XDG_SESSION_TYPE=wayland \
 QT_QPA_PLATFORM=wayland \
-    kwin_wayland --no-lockscreen --no-global-shortcuts \
+    kwin_wayland --no-lockscreen \
     --width 1920 --height 1080 --xwayland \
     > >(add_ts > "$LOG_DIR/kwin.log") 2>&1 &
 KWIN_PID=$!

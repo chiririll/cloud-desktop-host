@@ -56,7 +56,7 @@ if ! pgrep -u "$UID_SELF" -x kwin_wayland >/dev/null 2>&1; then
     WAYLAND_DISPLAY=wayland-cd \
     XDG_SESSION_TYPE=wayland \
     QT_QPA_PLATFORM=wayland \
-        kwin_wayland --no-lockscreen --no-global-shortcuts \
+        kwin_wayland --no-lockscreen \
         --width "$W" --height "$H" --xwayland \
         &>/dev/null &
     echo "[prep-desktop] KWin PID=$!"
