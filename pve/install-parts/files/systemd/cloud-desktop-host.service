@@ -1,0 +1,14 @@
+[Unit]
+Description=cloud-desktop-host session (compositor, KWin, Plasma, Sunshine)
+
+[Service]
+Type=simple
+# run.sh starts its own D-Bus session (dbus-launch) when this is unset
+UnsetEnvironment=DBUS_SESSION_BUS_ADDRESS
+ExecStart=@CT_CDH@/scripts/run.sh
+# run.sh exits when the compositor dies: bring the whole stack back
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

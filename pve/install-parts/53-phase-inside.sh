@@ -10,7 +10,7 @@ do_udevdb() {
 # With the input guard the CT has its own /dev/input and cdh-input-node sets the owner
 # (51-phase-guard.sh); this rule is only for CTs on the host's shared /dev/input.
 INPUT_RULE=/etc/udev/rules.d/60-lxc-virtual-input.rules
-input_rule_txt() { echo "SUBSYSTEM==\"input\", KERNEL==\"event*\", DEVPATH==\"/devices/virtual/input/*\", OWNER=\"$(host_uid)\", MODE=\"0600\""; }
+input_rule_txt() { local HOST_UID; HOST_UID=$(host_uid); render_file udev/60-lxc-virtual-input.rules HOST_UID; }
 chk_inrule() { [[ "$(cat $INPUT_RULE 2>/dev/null)" == "$(input_rule_txt)" ]]; }
 do_inrule()  { input_rule_txt >$INPUT_RULE; udevadm control --reload; }
 

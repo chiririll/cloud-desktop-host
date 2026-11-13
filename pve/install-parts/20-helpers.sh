@@ -8,6 +8,7 @@
 #   5. container       ct*, rpm_missing, chk_nocaps
 #   6. host            GPU discovery, host_uid, mod_persisted, input_isolated
 #   7. release bundle  manifest
+#   8. embedded files  render_file
 # ════════════════════════════════════════════════════════════════
 
 # ── 1. output, community-scripts style ─────────────────────────
@@ -193,3 +194,14 @@ input_isolated() { [[ $INSTALL_INPUT_GUARD != 0 ]]; }
 # ── 7. release bundle ──────────────────────────────────────────
 # release lines of MANIFEST that belong inside the CT (scripts/, configs/)
 manifest() { grep -E '  (scripts|configs)/' <<<"$MANIFEST"; }
+
+# ── 8. embedded files ──────────────────────────────────────────
+# install-parts/files/* are inlined by build.sh into get_file() (see build.sh), so the
+# installer stays one file. Files may hold @VAR@ placeholders.
+
+# render_file <file> [VAR…]: the file with every @VAR@ replaced by the value of $VAR
+render_file() {
+  local out v; out=$(get_file "$1"); shift
+  for v; do out=${out//@$v@/${!v}}; done
+  printf '%s\n' "$out"
+}

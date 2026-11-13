@@ -34,6 +34,157 @@
 #   CSRF_EXTRA=https://gaming.example.org   extra Sunshine web UI origins
 set -euo pipefail
 
+# ════ install-parts/files/* (inlined by build.sh) ════
+get_file() {
+  case $1 in
+    bin/cdh-input-node.sh)
+      cat <<'CDH_EMBEDDED_EOF'
+#!/bin/bash
+# cdh-input-node add|remove <eventN|jsN>
+# cdh-input-node sync
+#
+# Written by cloud-desktop-host pve/install.sh; a re-run overwrites it.
+#
+# Gives each container only the virtual input devices it created. cdh_input_guard
+# records the cgroup of the process that created a uinput device in the root-only
+# sysfs attribute cdh_owner_cgroup. For a device created inside CT <id> this makes
+# /dev/cdh-input/<id>/<node>, owned by the uid in /etc/cdh-input/<id>.uid; that
+# directory is the CT's /dev/input. A device with no owner (created before the
+# module loaded, or by the host) is given to nobody.
+#
+# udev runs add/remove (72-cdh-input-node.rules); install.sh runs sync.
+set -u
+shopt -s nullglob
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+SYS=/sys/class/input
+ROOT=/dev/cdh-input
+CONF=/etc/cdh-input
+
+valid() { [[ $1 =~ ^(event|js)[0-9]+$ ]]; }
+
+# Prints the id of the CT that created the device, nothing if there is none.
+# The attribute is untrusted: below /lxc/<id>/ the container names its own
+# cgroups, so only the start of the path is used.
+owner_ct() {
+  local f=$SYS/$1/device/cdh_owner_cgroup path=
+  [[ -r $f ]] || return 0
+  IFS= read -r path <"$f" || true
+  if [[ $path =~ ^/lxc/([0-9]+)/ ]]; then echo "${BASH_REMATCH[1]}"; fi
+}
+
+# drop <node> [ct]: remove the node from every CT directory except ct's
+drop() {
+  local d
+  for d in "$ROOT"/*/; do
+    [[ $d == "$ROOT/${2:-}/" ]] || rm -f -- "$d$1"
+  done
+}
+
+add() {
+  local name=$1 ct dir uid major='' minor='' node tmp
+  ct=$(owner_ct "$name")
+  # The kernel reuses names and minors: a leftover node with this name in another
+  # CT's directory would now open this device.
+  drop "$name" "$ct"
+  [[ -n $ct ]] || return 0
+  dir=$ROOT/$ct
+  [[ -d $dir ]] || return 0                    # not a CT set up by install.sh
+  uid=$(cat "$CONF/$ct.uid" 2>/dev/null)
+  [[ $uid =~ ^[0-9]+$ ]] || return 0
+  [[ -r $SYS/$name/dev ]] || return 0          # gone again
+  IFS=: read -r major minor <"$SYS/$name/dev" || true
+  [[ $major == 13 && $minor =~ ^[0-9]+$ ]] || return 0
+
+  node=$dir/$name
+  if [[ -c $node && ! -L $node &&
+        $(stat -c '%u %a %t %T' "$node") == "$(printf '%s 600 %x %x' "$uid" "$major" "$minor")" ]]; then
+    return 0
+  fi
+  # Finish the node under a name the CT ignores, then rename it into place.
+  tmp=$dir/.$name.new
+  rm -f -- "$tmp"
+  if mknod -m 0600 "$tmp" c "$major" "$minor" && chown "$uid" "$tmp" && mv -fT -- "$tmp" "$node"; then
+    return 0
+  fi
+  rm -f -- "$tmp"
+  return 1
+}
+
+sync() {
+  local node name ct s rc=0
+  for node in "$ROOT"/*/* "$ROOT"/*/.[!.]*; do
+    name=${node##*/}
+    ct=${node%/*}; ct=${ct##*/}
+    if ! valid "$name" || [[ ! -e $SYS/$name || $(owner_ct "$name") != "$ct" ]]; then
+      rm -f -- "$node"
+    fi
+  done
+  for s in "$SYS"/event* "$SYS"/js*; do
+    add "${s##*/}" || rc=1
+  done
+  return $rc
+}
+
+[[ -d $ROOT ]] || exit 0                       # no CT uses this yet
+exec 9>"$ROOT/.lock" || exit 1
+flock 9 || exit 1                              # udev runs one of these per device, in parallel
+
+case ${1:-} in
+  add|remove)
+    valid "${2:-}" || { echo "cdh-input-node: bad node name '${2:-}'" >&2; exit 2; }
+    if [[ $1 == add ]]; then add "$2"; else drop "$2"; fi
+    ;;
+  sync) sync ;;
+  *) echo "usage: cdh-input-node add|remove <eventN|jsN> | sync" >&2; exit 2 ;;
+esac
+CDH_EMBEDDED_EOF
+      ;;
+    systemd/cloud-desktop-host.service)
+      cat <<'CDH_EMBEDDED_EOF'
+[Unit]
+Description=cloud-desktop-host session (compositor, KWin, Plasma, Sunshine)
+
+[Service]
+Type=simple
+# run.sh starts its own D-Bus session (dbus-launch) when this is unset
+UnsetEnvironment=DBUS_SESSION_BUS_ADDRESS
+ExecStart=@CT_CDH@/scripts/run.sh
+# run.sh exits when the compositor dies: bring the whole stack back
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+CDH_EMBEDDED_EOF
+      ;;
+    udev/60-lxc-virtual-input.rules)
+      cat <<'CDH_EMBEDDED_EOF'
+SUBSYSTEM=="input", KERNEL=="event*", DEVPATH=="/devices/virtual/input/*", OWNER="@HOST_UID@", MODE="0600"
+CDH_EMBEDDED_EOF
+      ;;
+    udev/72-cdh-input-node.rules)
+      cat <<'CDH_EMBEDDED_EOF'
+# Per-container /dev/input, see /usr/local/sbin/cdh-input-node.
+# Written by cloud-desktop-host pve/install.sh; a re-run overwrites it.
+#
+# cdh_input_guard sends "change" once the owner attribute exists, so the helper
+# runs on add and on change. It reads the owner from sysfs itself: the container
+# names part of that path, so it must not be substituted into RUN here.
+
+SUBSYSTEM!="input", GOTO="cdh_input_node_end"
+KERNEL!="event*|js*", GOTO="cdh_input_node_end"
+DEVPATH!="/devices/virtual/input/*", GOTO="cdh_input_node_end"
+
+ACTION=="remove", RUN+="/usr/local/sbin/cdh-input-node remove %k"
+ACTION=="add|change", RUN+="/usr/local/sbin/cdh-input-node add %k"
+
+LABEL="cdh_input_node_end"
+CDH_EMBEDDED_EOF
+      ;;
+    *) echo "get_file: no file $1" >&2; return 1 ;;
+  esac
+}
+
 # ════ install-parts/10-config.sh ════
 # ── settings: defaults, env overrides, CLI ─────────────────────
 CTID=${CTID:-}
@@ -114,6 +265,7 @@ parse_args() {
 #   5. container       ct*, rpm_missing, chk_nocaps
 #   6. host            GPU discovery, host_uid, mod_persisted, input_isolated
 #   7. release bundle  manifest
+#   8. embedded files  render_file
 # ════════════════════════════════════════════════════════════════
 
 # ── 1. output, community-scripts style ─────────────────────────
@@ -299,6 +451,17 @@ input_isolated() { [[ $INSTALL_INPUT_GUARD != 0 ]]; }
 # ── 7. release bundle ──────────────────────────────────────────
 # release lines of MANIFEST that belong inside the CT (scripts/, configs/)
 manifest() { grep -E '  (scripts|configs)/' <<<"$MANIFEST"; }
+
+# ── 8. embedded files ──────────────────────────────────────────
+# install-parts/files/* are inlined by build.sh into get_file() (see build.sh), so the
+# installer stays one file. Files may hold @VAR@ placeholders.
+
+# render_file <file> [VAR…]: the file with every @VAR@ replaced by the value of $VAR
+render_file() {
+  local out v; out=$(get_file "$1"); shift
+  for v; do out=${out//@$v@/${!v}}; done
+  printf '%s\n' "$out"
+}
 
 # ════ install-parts/30-release.sh ════
 # ── release bundle: cdh/{cloud-desktop-host,scripts,configs,pve} ──
@@ -571,128 +734,9 @@ INPUT_CONF=/etc/cdh-input                      # <ctid>.uid: host uid that owns 
 INPUT_HELPER=/usr/local/sbin/cdh-input-node
 INPUT_NODE_RULE=/etc/udev/rules.d/72-cdh-input-node.rules
 
-input_helper_txt() {
-  cat <<'EOF'
-#!/bin/bash
-# cdh-input-node add|remove <eventN|jsN>
-# cdh-input-node sync
-#
-# Written by cloud-desktop-host pve/install.sh; a re-run overwrites it.
-#
-# Gives each container only the virtual input devices it created. cdh_input_guard
-# records the cgroup of the process that created a uinput device in the root-only
-# sysfs attribute cdh_owner_cgroup. For a device created inside CT <id> this makes
-# /dev/cdh-input/<id>/<node>, owned by the uid in /etc/cdh-input/<id>.uid; that
-# directory is the CT's /dev/input. A device with no owner (created before the
-# module loaded, or by the host) is given to nobody.
-#
-# udev runs add/remove (72-cdh-input-node.rules); install.sh runs sync.
-set -u
-shopt -s nullglob
-PATH=/usr/sbin:/usr/bin:/sbin:/bin
-SYS=/sys/class/input
-ROOT=/dev/cdh-input
-CONF=/etc/cdh-input
+input_helper_txt() { get_file bin/cdh-input-node.sh; }
 
-valid() { [[ $1 =~ ^(event|js)[0-9]+$ ]]; }
-
-# Prints the id of the CT that created the device, nothing if there is none.
-# The attribute is untrusted: below /lxc/<id>/ the container names its own
-# cgroups, so only the start of the path is used.
-owner_ct() {
-  local f=$SYS/$1/device/cdh_owner_cgroup path=
-  [[ -r $f ]] || return 0
-  IFS= read -r path <"$f" || true
-  if [[ $path =~ ^/lxc/([0-9]+)/ ]]; then echo "${BASH_REMATCH[1]}"; fi
-}
-
-# drop <node> [ct]: remove the node from every CT directory except ct's
-drop() {
-  local d
-  for d in "$ROOT"/*/; do
-    [[ $d == "$ROOT/${2:-}/" ]] || rm -f -- "$d$1"
-  done
-}
-
-add() {
-  local name=$1 ct dir uid major='' minor='' node tmp
-  ct=$(owner_ct "$name")
-  # The kernel reuses names and minors: a leftover node with this name in another
-  # CT's directory would now open this device.
-  drop "$name" "$ct"
-  [[ -n $ct ]] || return 0
-  dir=$ROOT/$ct
-  [[ -d $dir ]] || return 0                    # not a CT set up by install.sh
-  uid=$(cat "$CONF/$ct.uid" 2>/dev/null)
-  [[ $uid =~ ^[0-9]+$ ]] || return 0
-  [[ -r $SYS/$name/dev ]] || return 0          # gone again
-  IFS=: read -r major minor <"$SYS/$name/dev" || true
-  [[ $major == 13 && $minor =~ ^[0-9]+$ ]] || return 0
-
-  node=$dir/$name
-  if [[ -c $node && ! -L $node &&
-        $(stat -c '%u %a %t %T' "$node") == "$(printf '%s 600 %x %x' "$uid" "$major" "$minor")" ]]; then
-    return 0
-  fi
-  # Finish the node under a name the CT ignores, then rename it into place.
-  tmp=$dir/.$name.new
-  rm -f -- "$tmp"
-  if mknod -m 0600 "$tmp" c "$major" "$minor" && chown "$uid" "$tmp" && mv -fT -- "$tmp" "$node"; then
-    return 0
-  fi
-  rm -f -- "$tmp"
-  return 1
-}
-
-sync() {
-  local node name ct s rc=0
-  for node in "$ROOT"/*/* "$ROOT"/*/.[!.]*; do
-    name=${node##*/}
-    ct=${node%/*}; ct=${ct##*/}
-    if ! valid "$name" || [[ ! -e $SYS/$name || $(owner_ct "$name") != "$ct" ]]; then
-      rm -f -- "$node"
-    fi
-  done
-  for s in "$SYS"/event* "$SYS"/js*; do
-    add "${s##*/}" || rc=1
-  done
-  return $rc
-}
-
-[[ -d $ROOT ]] || exit 0                       # no CT uses this yet
-exec 9>"$ROOT/.lock" || exit 1
-flock 9 || exit 1                              # udev runs one of these per device, in parallel
-
-case ${1:-} in
-  add|remove)
-    valid "${2:-}" || { echo "cdh-input-node: bad node name '${2:-}'" >&2; exit 2; }
-    if [[ $1 == add ]]; then add "$2"; else drop "$2"; fi
-    ;;
-  sync) sync ;;
-  *) echo "usage: cdh-input-node add|remove <eventN|jsN> | sync" >&2; exit 2 ;;
-esac
-EOF
-}
-
-input_node_rule_txt() {
-  cat <<'EOF'
-# Per-container /dev/input, see /usr/local/sbin/cdh-input-node.
-# Written by cloud-desktop-host pve/install.sh; a re-run overwrites it.
-#
-# cdh_input_guard sends "change" once the owner attribute exists, so the helper
-# runs on add and on change. It reads the owner from sysfs itself: the container
-# names part of that path, so it must not be substituted into RUN here.
-
-SUBSYSTEM!="input", GOTO="cdh_input_node_end"
-KERNEL!="event*|js*", GOTO="cdh_input_node_end"
-DEVPATH!="/devices/virtual/input/*", GOTO="cdh_input_node_end"
-
-ACTION=="remove", RUN+="/usr/local/sbin/cdh-input-node remove %k"
-ACTION=="add|change", RUN+="/usr/local/sbin/cdh-input-node add %k"
-
-LABEL="cdh_input_node_end"
-EOF
-}
+input_node_rule_txt() { get_file udev/72-cdh-input-node.rules; }
 
 chk_input_helper() {
   [[ -x $INPUT_HELPER && "$(cat "$INPUT_HELPER")" == "$(input_helper_txt)" ]] || { why "$INPUT_HELPER missing or outdated"; return; }
@@ -919,7 +963,7 @@ do_udevdb() {
 # With the input guard the CT has its own /dev/input and cdh-input-node sets the owner
 # (51-phase-guard.sh); this rule is only for CTs on the host's shared /dev/input.
 INPUT_RULE=/etc/udev/rules.d/60-lxc-virtual-input.rules
-input_rule_txt() { echo "SUBSYSTEM==\"input\", KERNEL==\"event*\", DEVPATH==\"/devices/virtual/input/*\", OWNER=\"$(host_uid)\", MODE=\"0600\""; }
+input_rule_txt() { local HOST_UID; HOST_UID=$(host_uid); render_file udev/60-lxc-virtual-input.rules HOST_UID; }
 chk_inrule() { [[ "$(cat $INPUT_RULE 2>/dev/null)" == "$(input_rule_txt)" ]]; }
 do_inrule()  { input_rule_txt >$INPUT_RULE; udevadm control --reload; }
 
@@ -1037,24 +1081,7 @@ phase_inside() {
 # started at boot thanks to linger. Last, so it starts with everything installed.
 SESSION_UNIT=cloud-desktop-host.service
 SESSION_UNIT_FILE=/etc/systemd/user/$SESSION_UNIT
-session_unit_txt() {
-  cat <<EOF
-[Unit]
-Description=cloud-desktop-host session (compositor, KWin, Plasma, Sunshine)
-
-[Service]
-Type=simple
-# run.sh starts its own D-Bus session (dbus-launch) when this is unset
-UnsetEnvironment=DBUS_SESSION_BUS_ADDRESS
-ExecStart=$CT_CDH/scripts/run.sh
-# run.sh exits when the compositor dies: bring the whole stack back
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-EOF
-}
+session_unit_txt() { render_file systemd/cloud-desktop-host.service CT_CDH; }
 chk_session() {
   [[ "$(ct cat "$SESSION_UNIT_FILE" 2>/dev/null)" == "$(session_unit_txt)" ]] \
     || { why "$SESSION_UNIT_FILE missing or outdated"; return; }

@@ -3,24 +3,7 @@
 # started at boot thanks to linger. Last, so it starts with everything installed.
 SESSION_UNIT=cloud-desktop-host.service
 SESSION_UNIT_FILE=/etc/systemd/user/$SESSION_UNIT
-session_unit_txt() {
-  cat <<EOF
-[Unit]
-Description=cloud-desktop-host session (compositor, KWin, Plasma, Sunshine)
-
-[Service]
-Type=simple
-# run.sh starts its own D-Bus session (dbus-launch) when this is unset
-UnsetEnvironment=DBUS_SESSION_BUS_ADDRESS
-ExecStart=$CT_CDH/scripts/run.sh
-# run.sh exits when the compositor dies: bring the whole stack back
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-EOF
-}
+session_unit_txt() { render_file systemd/cloud-desktop-host.service CT_CDH; }
 chk_session() {
   [[ "$(ct cat "$SESSION_UNIT_FILE" 2>/dev/null)" == "$(session_unit_txt)" ]] \
     || { why "$SESSION_UNIT_FILE missing or outdated"; return; }

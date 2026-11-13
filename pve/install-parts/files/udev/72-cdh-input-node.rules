@@ -1,0 +1,15 @@
+# Per-container /dev/input, see /usr/local/sbin/cdh-input-node.
+# Written by cloud-desktop-host pve/install.sh; a re-run overwrites it.
+#
+# cdh_input_guard sends "change" once the owner attribute exists, so the helper
+# runs on add and on change. It reads the owner from sysfs itself: the container
+# names part of that path, so it must not be substituted into RUN here.
+
+SUBSYSTEM!="input", GOTO="cdh_input_node_end"
+KERNEL!="event*|js*", GOTO="cdh_input_node_end"
+DEVPATH!="/devices/virtual/input/*", GOTO="cdh_input_node_end"
+
+ACTION=="remove", RUN+="/usr/local/sbin/cdh-input-node remove %k"
+ACTION=="add|change", RUN+="/usr/local/sbin/cdh-input-node add %k"
+
+LABEL="cdh_input_node_end"

@@ -1,0 +1,1 @@
+SUBSYSTEM=="input", KERNEL=="event*", DEVPATH=="/devices/virtual/input/*", OWNER="@HOST_UID@", MODE="0600"
