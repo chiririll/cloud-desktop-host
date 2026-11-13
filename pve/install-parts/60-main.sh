@@ -1,6 +1,6 @@
 # ── main: the order of things lives here ───────────────────────
 # To add a step: write chk_*/do_* in the matching phase part and call `step` from its
-# phase_* function. A new phase = a new parts/NN-*.sh file + one line below.
+# phase_* function. A new phase = a new install-parts/NN-*.sh file + one line below.
 main() {
   parse_args "$@"
   trap 'rm -rf "${BUNDLE_TMP:-}"' EXIT

@@ -21,7 +21,6 @@ RestartSec=5
 WantedBy=default.target
 EOF
 }
-ct_systemctl() { ct_user "XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user $*"; }
 chk_session() {
   [[ "$(ct cat "$SESSION_UNIT_FILE" 2>/dev/null)" == "$(session_unit_txt)" ]] \
     || { why "$SESSION_UNIT_FILE missing or outdated"; return; }

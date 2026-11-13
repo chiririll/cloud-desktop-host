@@ -81,8 +81,6 @@ INPUT_CONF=/etc/cdh-input                      # <ctid>.uid: host uid that owns 
 INPUT_HELPER=/usr/local/sbin/cdh-input-node
 INPUT_NODE_RULE=/etc/udev/rules.d/72-cdh-input-node.rules
 
-input_isolated() { [[ $INSTALL_INPUT_GUARD != 0 ]]; }
-
 input_helper_txt() {
   cat <<'EOF'
 #!/bin/bash
@@ -257,7 +255,7 @@ legacy_input_cts() {
   echo "${out[*]}"
 }
 
-# 60-lxc-virtual-input.rules (72-phase-inside.sh) hands every virtual device on the
+# 60-lxc-virtual-input.rules (53-phase-inside.sh) hands every virtual device on the
 # host to one uid. Only CTs on the shared /dev/input need it.
 chk_no_inrule() { [[ ! -e $INPUT_RULE ]] || why "$INPUT_RULE still gives every virtual input device to one uid"; }
 do_no_inrule()  { rm -f "$INPUT_RULE"; udevadm control --reload; }

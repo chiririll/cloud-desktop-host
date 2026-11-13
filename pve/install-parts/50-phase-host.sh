@@ -13,9 +13,6 @@ chk_uvm() { [[ -c /dev/nvidia-uvm ]] || why "/dev/nvidia-uvm missing"; }
 do_uvm()  { nvidia-modprobe -c0 -u; }
 
 # warning only: you may load these some other way (e.g. CUDA/nvidia-smi before the CT starts)
-mod_persisted() { # any file, so a missing /etc/modules doesn't make grep fail
-  local f; for f in /etc/modules /etc/modules-load.d/*.conf; do grep -qsxE "[[:space:]]*$1[[:space:]]*" "$f" && return 0; done; return 1
-}
 chk_reboot() {
   local r=0
   mod_persisted uinput || { echo "uinput not in /etc/modules-load.d"; r=1; }

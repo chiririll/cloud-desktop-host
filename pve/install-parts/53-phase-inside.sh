@@ -8,9 +8,8 @@ do_udevdb() {
 
 # Sunshine's virtual input devices must be owned by the CT user's uid as seen from the host.
 # With the input guard the CT has its own /dev/input and cdh-input-node sets the owner
-# (74-phase-guard.sh); this rule is only for CTs on the host's shared /dev/input.
+# (51-phase-guard.sh); this rule is only for CTs on the host's shared /dev/input.
 INPUT_RULE=/etc/udev/rules.d/60-lxc-virtual-input.rules
-host_uid() { local u; u=$(ct id -u "$CT_USER" 2>/dev/null) || u=''; echo $((100000 + ${u:-1000})); }
 input_rule_txt() { echo "SUBSYSTEM==\"input\", KERNEL==\"event*\", DEVPATH==\"/devices/virtual/input/*\", OWNER=\"$(host_uid)\", MODE=\"0600\""; }
 chk_inrule() { [[ "$(cat $INPUT_RULE 2>/dev/null)" == "$(input_rule_txt)" ]]; }
 do_inrule()  { input_rule_txt >$INPUT_RULE; udevadm control --reload; }
@@ -38,7 +37,6 @@ chk_cdh() {
 }
 do_cdh()  { pct push "$CTID" "$CDH_BIN" /usr/local/bin/cloud-desktop-host --perms 0755; }
 
-manifest() { grep -E '  (scripts|configs)/' <<<"$MANIFEST"; }
 chk_scripts() { manifest | pct exec "$CTID" -- sh -c "cd $CT_CDH 2>/dev/null || { echo '$CT_CDH missing'; exit 1; }
     out=\$(sha256sum -c --quiet - 2>/dev/null); rc=\$?
     printf '%s\n' \"\$out\" | sed -n 's/: FAILED.*/ differs or is missing/p'; exit \$rc"; }

@@ -82,7 +82,7 @@ CT_PACKAGES=(dbus-daemon dbus-tools dbus-x11 pipewire wireplumber pipewire-pulse
 CHECK_ONLY=0
 CONF=''          # /etc/pve/lxc/<CTID>.conf
 CT_NAME=''       # hostname of the CT if it already exists, empty = will be created
-MANIFEST=''      # "sha256  path" lines of the release bundle, see 50-release.sh
+MANIFEST=''      # "sha256  path" lines of the release bundle, see 30-release.sh
 BUNDLE_TMP=''    # temp dir of the downloaded bundle, removed on exit
 NEEDED=0         # steps still needed (--check)
 RESTART_CT=0     # a step changed the CT config: restart before going inside
@@ -103,11 +103,25 @@ parse_args() {
   done
 }
 
-# ════ install-parts/20-ui.sh ════
-# ── output, community-scripts style ────────────────────────────
+# ════ install-parts/20-helpers.sh ════
+# ════════════════════════════════════════════════════════════════
+# Helpers: every small reusable function lives in this file.
+# The phase files (70-74) only contain their own checks/applies.
+#   1. output          msg_*, die, header
+#   2. prompts         ask, confirm
+#   3. step engine     why, step, require
+#   4. validation      is_supported_fedora, IPV4_RE
+#   5. container       ct*, rpm_missing, chk_nocaps
+#   6. host            GPU discovery, host_uid, mod_persisted, input_isolated
+#   7. release bundle  manifest
+# ════════════════════════════════════════════════════════════════
+
+# ── 1. output, community-scripts style ─────────────────────────
 if [[ -t 1 ]]; then
   GN=$'\e[32m' YW=$'\e[33m' RD=$'\e[31m' BL=$'\e[36m' DM=$'\e[2m' CL=$'\e[0m'
-else GN='' YW='' RD='' BL='' DM='' CL=''; fi
+else
+  GN='' YW='' RD='' BL='' DM='' CL=''
+fi
 msg_info() { printf ' %s…%s %s' "$YW" "$CL" "$1"; }
 msg_ok()   { printf '\r\e[K %s✔%s %s%s%s\n' "$GN" "$CL" "$1" "$DM" "${2:+ ($2)}$CL"; }
 msg_todo() { printf '\r\e[K %s◦%s %s %s(needed)%s\n' "$BL" "$CL" "$1" "$YW" "$CL"; }
@@ -115,9 +129,10 @@ msg_warn() { printf '\r\e[K %s!%s %s\n' "$YW" "$CL" "$1"; }
 die()      { printf '\r\e[K %s✘%s %s\n' "$RD" "$CL" "$1"; exit 1; }
 header()   { printf '\n%s── %s%s\n' "$BL" "$1" "$CL"; }
 
-# ── prompts (read from /dev/tty so `bash -c "$(curl …)"` works too) ──
+# ── 2. prompts (read from /dev/tty so `bash -c "$(curl …)"` works too) ──
 have_tty() { { : </dev/tty; } 2>/dev/null; }
-# ask VAR "question" default [regex]: keeps VAR if already set (env)
+
+# ask VAR "question" default [regex]: keeps VAR if it is already set (env)
 ask() {
   local var=$1 q=$2 def=$3 re=${4:-.} ans
   [[ -n ${!var} ]] && return 0
@@ -130,7 +145,9 @@ ask() {
   done
   printf -v "$var" '%s' "$ans"
 }
-confirm() { # confirm "question" [default y|n, n] → 0 if yes
+
+# confirm "question" [y|n, default n]: returns 0 for yes (always yes with YES=1 or no tty)
+confirm() {
   local ans def=${2:-n} hint=y/N
   [[ $def == y ]] && hint=Y/n
   ((YES)) && return 0
@@ -139,28 +156,40 @@ confirm() { # confirm "question" [default y|n, n] → 0 if yes
   [[ ${ans:-$def} =~ ^[Yy] ]]
 }
 
-# ════ install-parts/30-step.sh ════
-# ── step engine ────────────────────────────────────────────────
+# ── 3. step engine ─────────────────────────────────────────────
 # step "description" check apply
 #   check/apply are function names; extra words become arguments
 #   ("chk_nocaps sunshine"), so one pair of functions can serve several steps.
 #   Checks print WHY they fail (one reason per line, see why()); shown under "needed".
 #   Globals: CHECK_ONLY (read), NEEDED (counted in --check), APPLIED (set to 1 if applied).
 # require "description" check "hint": a check we can't fix automatically.
-why()  { echo "$*"; return 1; }
+
+# why <reason>: print the reason and fail; the last line of a failing check
+why() { echo "$*"; return 1; }
+
+# show_why <check output>: first lines of a check's output, dimmed and indented
 show_why() { [[ -n $1 ]] && sed -n '1,8p' <<<"$1" | sed "s/^/     $DM/; s/\$/$CL/"; return 0; }
 
 step() {
   local name=$1 check=$2 apply=$3 rc out
   APPLIED=0
+
   if out=$($check 2>&1); then msg_ok "$name"; return 0; fi
-  if ((CHECK_ONLY)); then msg_todo "$name"; show_why "$out"; NEEDED=$((NEEDED + 1)); return 0; fi
+
+  if ((CHECK_ONLY)); then
+    msg_todo "$name"; show_why "$out"
+    NEEDED=$((NEEDED + 1))
+    return 0
+  fi
+
   msg_info "$name"
   printf '=== %s %s\n%s\n' "$(date -Is)" "$name" "$out" >>"$LOG"
   set +e; ( set -e; $apply ) >>"$LOG" 2>&1; rc=$?; set -e
   ((rc == 0)) || die "$name: failed (exit $rc), see $LOG"
+
   if ! out=$($check 2>&1); then
-    printf '\r\e[K'; show_why "$out"; die "$name: still not satisfied after applying, see $LOG"
+    printf '\r\e[K'; show_why "$out"
+    die "$name: still not satisfied after applying, see $LOG"
   fi
   APPLIED=1
   msg_ok "$name" "done"
@@ -169,21 +198,36 @@ step() {
 require() {
   local name=$1 check=$2 hint=$3 out
   out=$($check 2>&1) && { msg_ok "$name"; return 0; }
-  ((CHECK_ONLY)) && { msg_todo "$name: $hint"; show_why "$out"; NEEDED=$((NEEDED + 1)); return 0; }
+  if ((CHECK_ONLY)); then
+    msg_todo "$name: $hint"; show_why "$out"
+    NEEDED=$((NEEDED + 1))
+    return 0
+  fi
   show_why "$out"; die "$name: $hint"
 }
 
 # call right after a step whose change needs a CT restart
 restart_if_applied() { if ((APPLIED)); then RESTART_CT=1; fi; }
 
-# ════ install-parts/40-ct.sh ════
-# ── container + host helpers ───────────────────────────────────
+# ── 4. validation ──────────────────────────────────────────────
+IPV4_RE='([0-9]{1,3}\.){3}[0-9]{1,3}'
+
+is_supported_fedora() {
+  local v
+  for v in "${SUPPORTED_FEDORA[@]}"; do [[ $v == "$1" ]] && return 0; done
+  return 1
+}
+
+# ── 5. container ───────────────────────────────────────────────
 ct()      { pct exec "$CTID" -- "$@"; }
-ct_ip()   { ct ip -4 -o addr show dev eth0 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4; exit}'; }
 ct_sh()   { pct exec "$CTID" -- bash -c "$1"; }
 ct_user() { pct exec "$CTID" -- runuser -l "$CT_USER" -c "$1"; }
 ct_up()   { [[ "$(pct status "$CTID" 2>/dev/null)" == "status: running" ]]; }
 ct_gid()  { ct getent group "$1" | cut -d: -f3; }
+ct_ip()   { ct ip -4 -o addr show dev eth0 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4; exit}'; }
+
+# the CT user's systemd --user instance: ct_systemctl enable --now foo.service
+ct_systemctl() { ct_user "XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user $*"; }
 
 # ct_install_rpm <url|local .rpm> [lenient]
 # lenient=1: ignore dnf's exit code (e.g. Sunshine's postinst modprobe/udevadm fail in a CT)
@@ -201,7 +245,7 @@ ct_install_rpm() {
   return "$rc"
 }
 
-# rpm_missing pkg… → prints missing package names, fails if any
+# rpm_missing pkg… : prints the missing package names, fails if any
 rpm_missing() {
   local out rc=0 m
   out=$(ct rpm -q "$@" 2>&1) || rc=$?
@@ -211,12 +255,15 @@ rpm_missing() {
   why "rpm -q failed: $(head -1 <<<"$out")"
 }
 
-# step "…has no file caps" "chk_nocaps <binary>" "do_nocaps <binary>"
+# step "… has no file caps" "chk_nocaps <binary>" "do_nocaps <binary>"
 chk_nocaps() { ct bash -c 'f=$(readlink -f "$(command -v "$1")") && [ -z "$(getcap "$f")" ]' _ "$1"; }
 do_nocaps()  { ct bash -c 'setcap -r "$(readlink -f "$(command -v "$1")")"' _ "$1"; }
 
-# ── GPU discovery (on the Proxmox host) ────────────────────────
-drm_node() { # $1 = card|renderD → /dev/dri/<node> of the chosen NVIDIA GPU
+# ── 6. Proxmox host ────────────────────────────────────────────
+host_driver() { cat /sys/module/nvidia/version 2>/dev/null; }
+
+# drm_node card|renderD → /dev/dri/<node> of the chosen NVIDIA GPU
+drm_node() {
   local d n
   for d in /sys/class/drm/"$1"*; do
     n=${d##*/}; [[ $n =~ ^$1[0-9]+$ ]] || continue
@@ -226,14 +273,34 @@ drm_node() { # $1 = card|renderD → /dev/dri/<node> of the chosen NVIDIA GPU
   done
   return 1
 }
-nvidia_minor() { # /dev/nvidiaN of the chosen GPU
+
+# minor number N of /dev/nvidiaN for the chosen GPU
+nvidia_minor() {
   local pci=${NVIDIA_PCI:-$(basename "$(readlink -f "/sys/class/drm/$(basename "$(drm_node card)")/device")")}
   local m; m=$(awk '/^Device Minor:/{print $3}' "/proc/driver/nvidia/gpus/$pci/information" 2>/dev/null)
   echo "${m:-0}"
 }
-host_driver() { cat /sys/module/nvidia/version 2>/dev/null; }
 
-# ════ install-parts/50-release.sh ════
+# mod_persisted <module>: listed in /etc/modules or modules-load.d (any file, so a missing /etc/modules is fine)
+mod_persisted() {
+  local f
+  for f in /etc/modules /etc/modules-load.d/*.conf; do
+    grep -qsxE "[[:space:]]*$1[[:space:]]*" "$f" && return 0
+  done
+  return 1
+}
+
+# uid on the host of the CT user (unprivileged CT: shift 100000)
+host_uid() { local u; u=$(ct id -u "$CT_USER" 2>/dev/null) || u=''; echo $((100000 + ${u:-1000})); }
+
+# true when each CT gets its own /dev/input (needs the cdh_input_guard module)
+input_isolated() { [[ $INSTALL_INPUT_GUARD != 0 ]]; }
+
+# ── 7. release bundle ──────────────────────────────────────────
+# release lines of MANIFEST that belong inside the CT (scripts/, configs/)
+manifest() { grep -E '  (scripts|configs)/' <<<"$MANIFEST"; }
+
+# ════ install-parts/30-release.sh ════
 # ── release bundle: cdh/{cloud-desktop-host,scripts,configs,pve} ──
 # MANIFEST: "sha256  path" for cloud-desktop-host, scripts/*, configs/*.
 # --check only needs this (a few KB), the bundle is downloaded to apply.
@@ -286,7 +353,7 @@ phase_bundle() {
   fi
 }
 
-# ════ install-parts/60-resolve.sh ════
+# ════ install-parts/40-resolve.sh ════
 # ── interactive/env resolution: which CT, which Fedora, which options ──
 resolve_ctid() {
   if [[ -z $CTID ]]; then
@@ -305,26 +372,37 @@ resolve_ctid() {
 # existing CT → confirm; free ID → ask creation settings and confirm
 resolve_ct() {
   if pct status "$CTID" >/dev/null 2>&1; then
-    CT_NAME=$(pct config "$CTID" | awk '/^hostname:/{print $2}')
-    if ((!CHECK_ONLY)) && ! confirm "Install into existing CT $CTID (${CT_NAME:-?})? Its config may be changed and it may be restarted"; then
-      die "aborted"
-    fi
+    resolve_existing_ct
   elif ((!CHECK_ONLY)); then
-    if qm status "$CTID" >/dev/null 2>&1; then die "ID $CTID is used by a VM"; fi
-    echo "   CT $CTID does not exist and will be created:"
-    ask CT_HOSTNAME "Hostname" "cloud-desktop" '^[a-zA-Z0-9][a-zA-Z0-9.-]*$'
-    ask CT_STORAGE "Root disk storage" \
-      "$(pvesm status -content rootdir 2>/dev/null | awk 'NR>1 && $3=="active"{print $1; exit}' | grep . || echo local-lvm)" '^[A-Za-z0-9_.-]+$'
-    ask CT_DISK "Root disk size, GB" 64 '^[0-9]+$'
-    ask CT_CORES "CPU cores" 8 '^[0-9]+$'
-    ask CT_MEMORY "Memory, MB" 16384 '^[0-9]+$'
-    ask CT_BRIDGE "Network bridge" vmbr0 '^[A-Za-z0-9_.-]+$'
-    resolve_ct_network
-    confirm "Create CT $CTID '$CT_HOSTNAME' on $CT_STORAGE (${CT_DISK} GB, $CT_CORES cores, $CT_MEMORY MB, $CT_BRIDGE, ip $CT_IP${CT_GATEWAY:+ via $CT_GATEWAY})?" || die "aborted"
+    resolve_new_ct
   fi
 }
 
-IPV4_RE='([0-9]{1,3}\.){3}[0-9]{1,3}'
+resolve_existing_ct() {
+  CT_NAME=$(pct config "$CTID" | awk '/^hostname:/{print $2}')
+  ((CHECK_ONLY)) && return 0
+  confirm "Install into existing CT $CTID (${CT_NAME:-?})? Its config may be changed and it may be restarted" \
+    || die "aborted"
+}
+
+resolve_new_ct() {
+  local default_storage
+  if qm status "$CTID" >/dev/null 2>&1; then die "ID $CTID is used by a VM"; fi
+  default_storage=$(pvesm status -content rootdir 2>/dev/null | awk 'NR>1 && $3=="active"{print $1; exit}' | grep . || echo local-lvm)
+
+  echo "   CT $CTID does not exist and will be created:"
+  ask CT_HOSTNAME "Hostname"         "cloud-desktop"   '^[a-zA-Z0-9][a-zA-Z0-9.-]*$'
+  ask CT_STORAGE  "Root disk storage" "$default_storage" '^[A-Za-z0-9_.-]+$'
+  ask CT_DISK     "Root disk size, GB" 64              '^[0-9]+$'
+  ask CT_CORES    "CPU cores"        8                 '^[0-9]+$'
+  ask CT_MEMORY   "Memory, MB"       16384             '^[0-9]+$'
+  ask CT_BRIDGE   "Network bridge"   vmbr0             '^[A-Za-z0-9_.-]+$'
+  resolve_ct_network
+
+  confirm "Create CT $CTID '$CT_HOSTNAME' on $CT_STORAGE (${CT_DISK} GB, $CT_CORES cores, $CT_MEMORY MB, $CT_BRIDGE, ip $CT_IP${CT_GATEWAY:+ via $CT_GATEWAY})?" \
+    || die "aborted"
+}
+
 # CT_IP = dhcp | a.b.c.d/nn (+ CT_GATEWAY). Env values are validated too, ask() keeps them as is.
 resolve_ct_network() {
   ask CT_IP "IPv4 address: dhcp, or static in CIDR form like 192.168.1.50/24" dhcp "^(dhcp|$IPV4_RE/[0-9]{1,2})\$"
@@ -333,8 +411,6 @@ resolve_ct_network() {
   ask CT_GATEWAY "Gateway" "$(ip -4 route show default 2>/dev/null | awk '{print $3; exit}')" "^$IPV4_RE\$"
   [[ $CT_GATEWAY =~ ^$IPV4_RE$ ]] || die "static CT_IP needs CT_GATEWAY=a.b.c.d, got '${CT_GATEWAY:-}'"
 }
-
-is_supported_fedora() { local v; for v in "${SUPPORTED_FEDORA[@]}"; do [[ $v == "$1" ]] && return 0; done; return 1; }
 
 resolve_fedora() {
   local ct_fedora
@@ -367,7 +443,7 @@ resolve_options() {
   [[ $INSTALL_STEAM =~ ^[01]$ ]] || die "INSTALL_STEAM must be 1 or 0, got '$INSTALL_STEAM'"
 }
 
-# ════ install-parts/70-phase-host.sh ════
+# ════ install-parts/50-phase-host.sh ════
 # ── phase: Proxmox host (driver, modules) ──────────────────────
 chk_driver() { [[ -n "$(host_driver)" ]] && drm_node renderD; }
 
@@ -383,9 +459,6 @@ chk_uvm() { [[ -c /dev/nvidia-uvm ]] || why "/dev/nvidia-uvm missing"; }
 do_uvm()  { nvidia-modprobe -c0 -u; }
 
 # warning only: you may load these some other way (e.g. CUDA/nvidia-smi before the CT starts)
-mod_persisted() { # any file, so a missing /etc/modules doesn't make grep fail
-  local f; for f in /etc/modules /etc/modules-load.d/*.conf; do grep -qsxE "[[:space:]]*$1[[:space:]]*" "$f" && return 0; done; return 1
-}
 chk_reboot() {
   local r=0
   mod_persisted uinput || { echo "uinput not in /etc/modules-load.d"; r=1; }
@@ -414,343 +487,7 @@ phase_host() {
   fi
 }
 
-# ════ install-parts/71-phase-container.sh ════
-# ── phase: the LXC container itself (config, devices, restart) ──
-template() { pveam list "$TEMPLATE_STORAGE" 2>/dev/null | awk -v p="fedora-$FEDORA-default" '$1 ~ p {print $1}' | sort | tail -1; }
-chk_template() { pct status "$CTID" >/dev/null 2>&1 || [[ -n "$(template)" ]]; }
-do_template() {
-  pveam update
-  local t; t=$(pveam available --section system | awk -v p="fedora-$FEDORA-default" '$2 ~ p {print $2}' | sort | tail -1)
-  [[ -n $t ]] || { echo "no fedora-$FEDORA template in pveam"; return 1; }
-  pveam download "$TEMPLATE_STORAGE" "$t"
-}
-
-chk_ct() { pct status "$CTID" >/dev/null 2>&1; }
-do_ct() {
-  pct create "$CTID" "$(template)" \
-    --unprivileged 1 --features nesting=1,fuse=1 --ostype fedora \
-    --hostname "$CT_HOSTNAME" --cores "$CT_CORES" --memory "$CT_MEMORY" --swap 1024 \
-    --rootfs "$CT_STORAGE:$CT_DISK" --net0 "name=eth0,bridge=$CT_BRIDGE,ip=$CT_IP${CT_GATEWAY:+,gw=$CT_GATEWAY}"
-}
-
-chk_unpriv() { grep -q '^unprivileged: 1' "$CONF" && ! grep -q '^lxc.idmap' "$CONF"; }
-
-chk_nesting() { pct config "$CTID" | grep -q '^features:.*nesting=1'; }
-do_nesting()  { pct set "$CTID" --features nesting=1,fuse=1; }
-
-chk_running() { ct_up; }
-do_running()  { pct start "$CTID"; sleep 5; }
-
-# The CT's /dev/input: its own directory, filled by the host with the devices the CT
-# created (74-phase-guard.sh). Without the input guard nobody knows who created a
-# device, so the CT gets the host's /dev/input, which every such CT shares.
-input_mount() {
-  if input_isolated; then echo "lxc.mount.entry: $INPUT_ROOT/$CTID dev/input none bind,create=dir"
-  else echo "lxc.mount.entry: /dev/input dev/input none bind,optional,create=dir"; fi
-}
-
-# raw lxc.* keys, kept in the main section (before any [snapshot])
-raw_lines() {
-  cat <<EOF
-lxc.cgroup2.devices.allow: c 13:* rwm
-$(input_mount)
-lxc.mount.entry: /run/udev mnt/host-udev none bind,ro,optional,create=dir
-lxc.cap.drop:
-lxc.cap.drop: mac_admin mac_override sys_module sys_pacct sys_rawio sys_time
-lxc.mount.entry: tmpfs dev/shm tmpfs rw,nosuid,nodev,mode=1777,size=$SHM_SIZE,create=dir 0 0
-EOF
-}
-main_conf() { sed -e '/^\[/,$d' -e 's/[[:space:]]*$//' "$CONF"; }   # pve may keep "key: " with a trailing space
-missing_raw() { local l; while IFS= read -r l; do main_conf | grep -qxF "$l" || echo "$l"; done < <(raw_lines); }
-# a /dev/input mount entry other than input_mount: it would be mounted as well
-stale_input_mounts() {
-  main_conf | grep -E '^lxc\.mount\.entry: [^ ]+ dev/input ' | grep -vxF "$(input_mount)"
-  return 0
-}
-chk_raw() {
-  local m s; m=$(missing_raw); s=$(stale_input_mounts)
-  [[ -z $m && -z $s ]] && return 0
-  [[ -z $m ]] || sed 's/^/missing: /' <<<"$m"
-  [[ -z $s ]] || sed 's/^/to remove: /' <<<"$s"
-  return 1
-}
-do_raw() {
-  local add tmp
-  # drops the wanted entry too if it is there; missing_raw puts it back
-  if [[ -n $(stale_input_mounts) ]]; then
-    sed -i -E '1,/^\[/{/^lxc\.mount\.entry: [^ ]+ dev\/input /d}' "$CONF"   # main section only
-  fi
-  add=$(missing_raw)
-  # "lxc.cap.drop:" (reset) must come right before the explicit list
-  if grep -q '^lxc.cap.drop: mac_admin' <<<"$add" || grep -qx 'lxc.cap.drop:' <<<"$add"; then
-    sed -i '1,/^\[/{/^lxc\.cap\.drop:/d}' "$CONF"   # main section only
-    add=$(missing_raw)
-  fi
-  tmp=$(mktemp)
-  ADD="$add" awk 'BEGIN{a=ENVIRON["ADD"]} /^\[/ && !d {print a; d=1} {print} END{if(!d) print a}' "$CONF" >"$tmp"
-  cat "$tmp" >"$CONF"   # not mv: /etc/pve is pmxcfs
-  rm -f "$tmp"
-}
-
-chk_user() {
-  ct id "$CT_USER" >/dev/null 2>&1 || { why "user '$CT_USER' does not exist"; return; }
-  local g groups; groups=$(ct id -nG "$CT_USER")
-  for g in render input; do
-    grep -qw "$g" <<<"$groups" || { why "'$CT_USER' is not in group $g"; return; }
-  done
-}
-do_user() {
-  ct_sh "id $CT_USER >/dev/null 2>&1 || useradd -m $CT_USER"
-  ct usermod -aG video,render,input,wheel "$CT_USER"
-}
-
-# GPU/uinput passthrough entries (devN) wanted in the CT config, one per line
-desired_devs() {
-  local v r i card render minor p
-  v=$(ct_gid video) r=$(ct_gid render) i=$(ct_gid input)
-  [[ -n $v && -n $r && -n $i ]] || return 1
-  card=$(drm_node card) render=$(drm_node renderD) minor=$(nvidia_minor)
-  for p in /dev/nvidia"$minor" /dev/nvidiactl /dev/nvidia-modeset /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
-    [[ -e $p ]] && echo "$p,gid=$v,mode=0660"
-  done
-  echo "$render,gid=$r,mode=0660"
-  echo "/dev/uinput,gid=$i,mode=0660"
-  echo "$card,gid=$v,mode=0660"           # Sunshine's CUDA/NVENC path opens cardN
-}
-current_devs() { pct config "$CTID" | sed -n 's/^\(dev[0-9]*\): \(.*\)$/\1 \2/p'; }
-chk_devs() {
-  local want have; want=$(desired_devs) || return 1; have=$(current_devs | cut -d' ' -f2-)
-  [[ "$(sort <<<"$want")" == "$(grep -E '^/dev/(nvidia|dri/|uinput)' <<<"$have" | sort)" ]]
-}
-do_devs() {
-  local want key val spec n; want=$(desired_devs)
-  # drop stale GPU/input entries (e.g. cardN renumbered after a reboot)
-  while read -r key val; do
-    [[ $val =~ ^/dev/(nvidia|dri/|uinput) ]] || continue
-    grep -qxF "$val" <<<"$want" || pct set "$CTID" --delete "$key"
-  done < <(current_devs)
-  while read -r spec; do
-    current_devs | cut -d' ' -f2- | grep -qxF "$spec" && continue
-    n=0; while current_devs | grep -q "^dev$n "; do n=$((n + 1)); done
-    pct set "$CTID" --"dev$n" "$spec"
-  done <<<"$want"
-}
-
-phase_container() {
-  header "Container $CTID${CT_NAME:+ ($CT_NAME)}"
-  step "Fedora $FEDORA template" chk_template do_template
-  step "CT exists" chk_ct do_ct
-  require "CT is unprivileged (default idmap)" chk_unpriv \
-    "CT $CTID is privileged or uses a custom lxc.idmap; this script assumes uid shift 100000"
-
-  step "features nesting=1 (Steam bubblewrap)" chk_nesting do_nesting
-  restart_if_applied
-  # before the CT starts: its config may already mount this directory
-  if input_isolated; then step "input directory $INPUT_ROOT/$CTID" chk_input_dir do_input_dir; fi
-  step "CT running" chk_running do_running
-  step "lxc.conf: input bind, host udev, caps, /dev/shm" chk_raw do_raw
-  restart_if_applied
-  step "CT user '$CT_USER' (video,render,input,wheel)" chk_user do_user
-  if input_isolated; then step "input devices of CT $CTID owned by '$CT_USER'" chk_input_owner do_input_owner; fi
-  step "GPU/uinput passthrough ($(drm_node card 2>/dev/null), $(drm_node renderD 2>/dev/null))" chk_devs do_devs
-  restart_if_applied
-
-  if ((RESTART_CT && !CHECK_ONLY)); then
-    msg_info "Restarting CT (full stop/start to apply config)"
-    { pct stop "$CTID" && pct start "$CTID" && sleep 5; } >>"$LOG" 2>&1 || die "CT restart failed, see $LOG"
-    msg_ok "CT restarted"
-  fi
-}
-
-# ════ install-parts/72-phase-inside.sh ════
-# ── phase: inside the container (system, GPU userspace, Sunshine, Steam) ──
-UDEV_FSTAB_LINE='/mnt/host-udev  /run/udev  none  bind,ro  0 0'
-chk_udevdb() { ct grep -qxF "$UDEV_FSTAB_LINE" /etc/fstab && ct_sh 'ls /run/udev/data | grep -q .'; }
-do_udevdb() {
-  ct_sh "grep -qxF '$UDEV_FSTAB_LINE' /etc/fstab || echo '$UDEV_FSTAB_LINE' >> /etc/fstab"
-  ct_sh 'mountpoint -q /run/udev && ls /run/udev/data >/dev/null 2>&1 || mount /run/udev'
-}
-
-# Sunshine's virtual input devices must be owned by the CT user's uid as seen from the host.
-# With the input guard the CT has its own /dev/input and cdh-input-node sets the owner
-# (74-phase-guard.sh); this rule is only for CTs on the host's shared /dev/input.
-INPUT_RULE=/etc/udev/rules.d/60-lxc-virtual-input.rules
-host_uid() { local u; u=$(ct id -u "$CT_USER" 2>/dev/null) || u=''; echo $((100000 + ${u:-1000})); }
-input_rule_txt() { echo "SUBSYSTEM==\"input\", KERNEL==\"event*\", DEVPATH==\"/devices/virtual/input/*\", OWNER=\"$(host_uid)\", MODE=\"0600\""; }
-chk_inrule() { [[ "$(cat $INPUT_RULE 2>/dev/null)" == "$(input_rule_txt)" ]]; }
-do_inrule()  { input_rule_txt >$INPUT_RULE; udevadm control --reload; }
-
-chk_pkgs() { rpm_missing "${CT_PACKAGES[@]}"; }
-do_pkgs()  { ct dnf install -y "${CT_PACKAGES[@]}"; }
-
-chk_nvuser() { local drv; drv=$(host_driver) && [[ -n $drv ]] && ct test -e "/usr/lib64/libnvidia-glcore.so.$drv"; }
-do_nvuser() {
-  local drv; drv=$(host_driver)
-  ct curl -fsSLo /tmp/nvidia.run "https://download.nvidia.com/XFree86/Linux-x86_64/$drv/NVIDIA-Linux-x86_64-$drv.run"
-  ct sh /tmp/nvidia.run --no-kernel-module --install-compat32-libs -s
-  ct rm -f /tmp/nvidia.run
-}
-
-chk_smi() { ct nvidia-smi -L; }
-
-chk_linger() { ct test -e "/var/lib/systemd/linger/$CT_USER"; }
-do_linger()  { ct loginctl enable-linger "$CT_USER"; }
-
-chk_cdh() {
-  ct test -x /usr/local/bin/cloud-desktop-host || { why "/usr/local/bin/cloud-desktop-host not installed"; return; }
-  [[ "$(awk '$2=="cloud-desktop-host"{print $1}' <<<"$MANIFEST")" == "$(ct sha256sum /usr/local/bin/cloud-desktop-host | cut -d' ' -f1)" ]] \
-    || why "/usr/local/bin/cloud-desktop-host differs from the release/local build"
-}
-do_cdh()  { pct push "$CTID" "$CDH_BIN" /usr/local/bin/cloud-desktop-host --perms 0755; }
-
-manifest() { grep -E '  (scripts|configs)/' <<<"$MANIFEST"; }
-chk_scripts() { manifest | pct exec "$CTID" -- sh -c "cd $CT_CDH 2>/dev/null || { echo '$CT_CDH missing'; exit 1; }
-    out=\$(sha256sum -c --quiet - 2>/dev/null); rc=\$?
-    printf '%s\n' \"\$out\" | sed -n 's/: FAILED.*/ differs or is missing/p'; exit \$rc"; }
-do_scripts() {
-  tar -C "$REPO" -c scripts configs | pct exec "$CTID" -- sh -c "mkdir -p $CT_CDH &&
-    tar -C $CT_CDH --no-same-owner --no-same-permissions -x &&
-    chown -R root:root $CT_CDH && chmod -R u=rwX,go=rX $CT_CDH && chmod 0755 $CT_CDH/scripts/*.sh"
-}
-
-# ── Sunshine ──
-# The RPM is named "Sunshine" (capital S): match case-insensitively
-chk_sunshine() { ct_sh 'rpm -qa --qf "%{NAME}\n" | grep -qix sunshine' || why "Sunshine RPM not installed"; }
-latest_sunshine_rpm() {
-  curl -fsSL https://api.github.com/repos/LizardByte/Sunshine/releases/latest \
-    | grep -o '"browser_download_url": *"[^"]*\.fc'"$FEDORA"'\.x86_64\.rpm"' \
-    | head -1 | sed 's/.*"\(https:[^"]*\)"/\1/'
-}
-do_sunshine() {
-  if [[ -z $SUNSHINE_RPM ]]; then
-    SUNSHINE_RPM=$(latest_sunshine_rpm)
-    [[ -n $SUNSHINE_RPM ]] || { echo "no fc$FEDORA x86_64 RPM in latest Sunshine release"; return 1; }
-    echo "Sunshine: $SUNSHINE_RPM"
-  fi
-  ct_install_rpm "$SUNSHINE_RPM" 1   # postinst modprobe/udevadm fail in a CT
-}
-
-chk_ssconf() { ct_user 'test -s ~/.config/sunshine/sunshine.conf && test -s ~/.config/sunshine/apps.json'; }
-do_ssconf() {
-  local ip origins apps=apps-desktop.json
-  ip=$(ct_ip)
-  origins="https://$ip:47990${CSRF_EXTRA:+,$CSRF_EXTRA}"
-  ct_user "mkdir -p ~/.config/sunshine
-    test -s ~/.config/sunshine/sunshine.conf || printf '%s\n' \
-      'capture = wlr' 'encoder = nvenc' 'gamepad = xone' 'system_tray = disabled' \
-      'csrf_allowed_origins = $origins' > ~/.config/sunshine/sunshine.conf"
-  if ct_user 'test -s ~/.config/sunshine/apps.json'; then return 0; fi
-  if ((INSTALL_STEAM)); then apps=apps.json; fi   # no Steam: only the Desktop app
-  ct_user "cp $CT_CDH/configs/sunshine/$apps ~/.config/sunshine/apps.json"
-}
-
-# ── KCM Cloud Mouse ──
-# The default RPM is only built for some Fedora releases: skip with a warning instead of failing.
-chk_cloudmouse() { rpm_missing kcm-cloud-mouse; }
-do_cloudmouse()  { ct_install_rpm "$CLOUD_MOUSE_RPM"; }
-phase_cloudmouse() {
-  if ((CLOUD_MOUSE_DEFAULT)) && ! curl -fsIL -o /dev/null "$CLOUD_MOUSE_RPM"; then
-    msg_warn "KCM Cloud Mouse: no fc$FEDORA build in kcm-cloud-mouse releases, skipped (set CLOUD_MOUSE_RPM=<rpm> to install your own)"
-    return 0
-  fi
-  if [[ $CLOUD_MOUSE_RPM != none ]]; then
-    step "KCM Cloud Mouse (System Settings → Input Devices)" chk_cloudmouse do_cloudmouse
-  fi
-}
-
-# ── Steam ──
-chk_rpmfusion() { rpm_missing rpmfusion-nonfree-release; }
-do_rpmfusion()  { ct dnf install -y "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$FEDORA.noarch.rpm"; }
-chk_steam() { rpm_missing steam gamescope mangohud; }
-do_steam()  { ct dnf install -y steam gamescope mangohud; }
-phase_steam() {
-  if ((INSTALL_STEAM)); then
-    step "RPM Fusion nonfree" chk_rpmfusion do_rpmfusion
-    step "Steam + Gamescope + MangoHud" chk_steam do_steam
-    step "Gamescope has no file caps" "chk_nocaps gamescope" "do_nocaps gamescope"
-  fi
-}
-
-phase_inside() {
-  header "Inside the container"
-  step "host udev db at /run/udev" chk_udevdb do_udevdb
-  if input_isolated; then phase_shared_input_rule
-  else step "host udev rule: Sunshine virtual input → host uid $(host_uid)" chk_inrule do_inrule; fi
-  step "packages (KWin, Plasma, PipeWire, Xwayland…)" chk_pkgs do_pkgs
-  step "NVIDIA userspace $(host_driver || true) (matches host)" chk_nvuser do_nvuser
-  require "nvidia-smi works in CT" chk_smi "check devN entries and driver version, see $LOG"
-  step "linger for '$CT_USER'" chk_linger do_linger
-  step "cloud-desktop-host binary" chk_cdh do_cdh
-  step "CDH scripts + configs in $CT_CDH" chk_scripts do_scripts
-  step "Sunshine" chk_sunshine do_sunshine
-  step "Sunshine has no file caps (AT_SECURE breaks ENet)" "chk_nocaps sunshine" "do_nocaps sunshine"
-  step "Sunshine config (kept if it already exists)" chk_ssconf do_ssconf
-  phase_cloudmouse
-  phase_steam
-}
-
-# ════ install-parts/73-phase-services.sh ════
-# ── phase: user service ────────────────────────────────────────
-# The whole stack (compositor, KWin, Plasma, Sunshine) as a user service,
-# started at boot thanks to linger. Last, so it starts with everything installed.
-SESSION_UNIT=cloud-desktop-host.service
-SESSION_UNIT_FILE=/etc/systemd/user/$SESSION_UNIT
-session_unit_txt() {
-  cat <<EOF
-[Unit]
-Description=cloud-desktop-host session (compositor, KWin, Plasma, Sunshine)
-
-[Service]
-Type=simple
-# run.sh starts its own D-Bus session (dbus-launch) when this is unset
-UnsetEnvironment=DBUS_SESSION_BUS_ADDRESS
-ExecStart=$CT_CDH/scripts/run.sh
-# run.sh exits when the compositor dies: bring the whole stack back
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-EOF
-}
-ct_systemctl() { ct_user "XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user $*"; }
-chk_session() {
-  [[ "$(ct cat "$SESSION_UNIT_FILE" 2>/dev/null)" == "$(session_unit_txt)" ]] \
-    || { why "$SESSION_UNIT_FILE missing or outdated"; return; }
-  ct_systemctl is-enabled -q "$SESSION_UNIT" || why "$SESSION_UNIT not enabled for '$CT_USER'"
-}
-do_session() {
-  session_unit_txt | pct exec "$CTID" -- sh -c "mkdir -p ${SESSION_UNIT_FILE%/*} && cat > $SESSION_UNIT_FILE"
-  ct rm -f /etc/systemd/user/cdh-sunshine.service   # earlier Sunshine-only unit
-  ct_systemctl daemon-reload
-  ct_systemctl enable --now "$SESSION_UNIT"
-}
-
-phase_services() {
-  step "user service $SESSION_UNIT (starts at boot)" chk_session do_session
-}
-
-phase_summary() {
-  local ip
-  echo
-  if ((CHECK_ONLY)); then
-    if ((NEEDED)); then echo "${YW}$NEEDED step(s) needed.${CL} Run without --check to apply."
-    else echo "${GN}Everything is in place.${CL}"; fi
-    return 0
-  fi
-  ip=$(ct_ip)
-  cat <<EOF
-${GN}Done.${CL} Log: $LOG
-  Session: runs at boot as $CT_USER's user service $SESSION_UNIT. Control it with:
-    pct exec $CTID -- runuser -l $CT_USER -c 'XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user restart $SESSION_UNIT'
-    logs: journalctl --user -u $SESSION_UNIT, and /tmp/cdhost-logs/ in the CT
-  Web UI:  https://$ip:47990   (create the Sunshine login on first visit)
-  Moonlight: add $ip, enter the PIN in the web UI.
-  Set a password for '$CT_USER' if you need it:  pct exec $CTID -- passwd $CT_USER
-EOF
-}
-
-# ════ install-parts/74-phase-guard.sh ════
+# ════ install-parts/51-phase-guard.sh ════
 # ── phase: input guard kernel module (skipped with INSTALL_INPUT_GUARD=0) ──
 # cdh_input_guard (github.com/chiririll/cdh-input-guard) keeps virtual input devices
 # away from the host console. The release has one cdh_input_guard-<kver>.ko per Proxmox
@@ -833,8 +570,6 @@ INPUT_ROOT=/dev/cdh-input                      # <ctid>/eventN, jsN     (the sam
 INPUT_CONF=/etc/cdh-input                      # <ctid>.uid: host uid that owns the CT's nodes
 INPUT_HELPER=/usr/local/sbin/cdh-input-node
 INPUT_NODE_RULE=/etc/udev/rules.d/72-cdh-input-node.rules
-
-input_isolated() { [[ $INSTALL_INPUT_GUARD != 0 ]]; }
 
 input_helper_txt() {
   cat <<'EOF'
@@ -1010,7 +745,7 @@ legacy_input_cts() {
   echo "${out[*]}"
 }
 
-# 60-lxc-virtual-input.rules (72-phase-inside.sh) hands every virtual device on the
+# 60-lxc-virtual-input.rules (53-phase-inside.sh) hands every virtual device on the
 # host to one uid. Only CTs on the shared /dev/input need it.
 chk_no_inrule() { [[ ! -e $INPUT_RULE ]] || why "$INPUT_RULE still gives every virtual input device to one uid"; }
 do_no_inrule()  { rm -f "$INPUT_RULE"; udevadm control --reload; }
@@ -1023,10 +758,343 @@ phase_shared_input_rule() {
   fi
 }
 
-# ════ install-parts/90-main.sh ════
+# ════ install-parts/52-phase-container.sh ════
+# ── phase: the LXC container itself (config, devices, restart) ──
+template() { pveam list "$TEMPLATE_STORAGE" 2>/dev/null | awk -v p="fedora-$FEDORA-default" '$1 ~ p {print $1}' | sort | tail -1; }
+chk_template() { pct status "$CTID" >/dev/null 2>&1 || [[ -n "$(template)" ]]; }
+do_template() {
+  pveam update
+  local t; t=$(pveam available --section system | awk -v p="fedora-$FEDORA-default" '$2 ~ p {print $2}' | sort | tail -1)
+  [[ -n $t ]] || { echo "no fedora-$FEDORA template in pveam"; return 1; }
+  pveam download "$TEMPLATE_STORAGE" "$t"
+}
+
+chk_ct() { pct status "$CTID" >/dev/null 2>&1; }
+do_ct() {
+  pct create "$CTID" "$(template)" \
+    --unprivileged 1 --features nesting=1,fuse=1 --ostype fedora \
+    --hostname "$CT_HOSTNAME" --cores "$CT_CORES" --memory "$CT_MEMORY" --swap 1024 \
+    --rootfs "$CT_STORAGE:$CT_DISK" --net0 "name=eth0,bridge=$CT_BRIDGE,ip=$CT_IP${CT_GATEWAY:+,gw=$CT_GATEWAY}"
+}
+
+chk_unpriv() { grep -q '^unprivileged: 1' "$CONF" && ! grep -q '^lxc.idmap' "$CONF"; }
+
+chk_nesting() { pct config "$CTID" | grep -q '^features:.*nesting=1'; }
+do_nesting()  { pct set "$CTID" --features nesting=1,fuse=1; }
+
+chk_running() { ct_up; }
+do_running()  { pct start "$CTID"; sleep 5; }
+
+# The CT's /dev/input: its own directory, filled by the host with the devices the CT
+# created (51-phase-guard.sh). Without the input guard nobody knows who created a
+# device, so the CT gets the host's /dev/input, which every such CT shares.
+input_mount() {
+  if input_isolated; then echo "lxc.mount.entry: $INPUT_ROOT/$CTID dev/input none bind,create=dir"
+  else echo "lxc.mount.entry: /dev/input dev/input none bind,optional,create=dir"; fi
+}
+
+# raw lxc.* keys, kept in the main section (before any [snapshot])
+raw_lines() {
+  cat <<EOF
+lxc.cgroup2.devices.allow: c 13:* rwm
+$(input_mount)
+lxc.mount.entry: /run/udev mnt/host-udev none bind,ro,optional,create=dir
+lxc.cap.drop:
+lxc.cap.drop: mac_admin mac_override sys_module sys_pacct sys_rawio sys_time
+lxc.mount.entry: tmpfs dev/shm tmpfs rw,nosuid,nodev,mode=1777,size=$SHM_SIZE,create=dir 0 0
+EOF
+}
+main_conf() { sed -e '/^\[/,$d' -e 's/[[:space:]]*$//' "$CONF"; }   # pve may keep "key: " with a trailing space
+missing_raw() { local l; while IFS= read -r l; do main_conf | grep -qxF "$l" || echo "$l"; done < <(raw_lines); }
+# a /dev/input mount entry other than input_mount: it would be mounted as well
+stale_input_mounts() {
+  main_conf | grep -E '^lxc\.mount\.entry: [^ ]+ dev/input ' | grep -vxF "$(input_mount)"
+  return 0
+}
+chk_raw() {
+  local m s; m=$(missing_raw); s=$(stale_input_mounts)
+  [[ -z $m && -z $s ]] && return 0
+  [[ -z $m ]] || sed 's/^/missing: /' <<<"$m"
+  [[ -z $s ]] || sed 's/^/to remove: /' <<<"$s"
+  return 1
+}
+do_raw() {
+  local add tmp
+  # drops the wanted entry too if it is there; missing_raw puts it back
+  if [[ -n $(stale_input_mounts) ]]; then
+    sed -i -E '1,/^\[/{/^lxc\.mount\.entry: [^ ]+ dev\/input /d}' "$CONF"   # main section only
+  fi
+  add=$(missing_raw)
+  # "lxc.cap.drop:" (reset) must come right before the explicit list
+  if grep -q '^lxc.cap.drop: mac_admin' <<<"$add" || grep -qx 'lxc.cap.drop:' <<<"$add"; then
+    sed -i '1,/^\[/{/^lxc\.cap\.drop:/d}' "$CONF"   # main section only
+    add=$(missing_raw)
+  fi
+  tmp=$(mktemp)
+  ADD="$add" awk 'BEGIN{a=ENVIRON["ADD"]} /^\[/ && !d {print a; d=1} {print} END{if(!d) print a}' "$CONF" >"$tmp"
+  cat "$tmp" >"$CONF"   # not mv: /etc/pve is pmxcfs
+  rm -f "$tmp"
+}
+
+chk_user() {
+  ct id "$CT_USER" >/dev/null 2>&1 || { why "user '$CT_USER' does not exist"; return; }
+  local g groups; groups=$(ct id -nG "$CT_USER")
+  for g in render input; do
+    grep -qw "$g" <<<"$groups" || { why "'$CT_USER' is not in group $g"; return; }
+  done
+}
+do_user() {
+  ct_sh "id $CT_USER >/dev/null 2>&1 || useradd -m $CT_USER"
+  ct usermod -aG video,render,input,wheel "$CT_USER"
+}
+
+# GPU/uinput passthrough entries (devN) wanted in the CT config, one per line
+desired_devs() {
+  local v r i card render minor p
+  v=$(ct_gid video) r=$(ct_gid render) i=$(ct_gid input)
+  [[ -n $v && -n $r && -n $i ]] || return 1
+  card=$(drm_node card) render=$(drm_node renderD) minor=$(nvidia_minor)
+  for p in /dev/nvidia"$minor" /dev/nvidiactl /dev/nvidia-modeset /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
+    [[ -e $p ]] && echo "$p,gid=$v,mode=0660"
+  done
+  echo "$render,gid=$r,mode=0660"
+  echo "/dev/uinput,gid=$i,mode=0660"
+  echo "$card,gid=$v,mode=0660"           # Sunshine's CUDA/NVENC path opens cardN
+}
+current_devs() { pct config "$CTID" | sed -n 's/^\(dev[0-9]*\): \(.*\)$/\1 \2/p'; }
+chk_devs() {
+  local want have; want=$(desired_devs) || return 1; have=$(current_devs | cut -d' ' -f2-)
+  [[ "$(sort <<<"$want")" == "$(grep -E '^/dev/(nvidia|dri/|uinput)' <<<"$have" | sort)" ]]
+}
+do_devs() {
+  local want key val spec n; want=$(desired_devs)
+  # drop stale GPU/input entries (e.g. cardN renumbered after a reboot)
+  while read -r key val; do
+    [[ $val =~ ^/dev/(nvidia|dri/|uinput) ]] || continue
+    grep -qxF "$val" <<<"$want" || pct set "$CTID" --delete "$key"
+  done < <(current_devs)
+  while read -r spec; do
+    current_devs | cut -d' ' -f2- | grep -qxF "$spec" && continue
+    n=0; while current_devs | grep -q "^dev$n "; do n=$((n + 1)); done
+    pct set "$CTID" --"dev$n" "$spec"
+  done <<<"$want"
+}
+
+phase_container() {
+  header "Container $CTID${CT_NAME:+ ($CT_NAME)}"
+  step "Fedora $FEDORA template" chk_template do_template
+  step "CT exists" chk_ct do_ct
+  require "CT is unprivileged (default idmap)" chk_unpriv \
+    "CT $CTID is privileged or uses a custom lxc.idmap; this script assumes uid shift 100000"
+
+  step "features nesting=1 (Steam bubblewrap)" chk_nesting do_nesting
+  restart_if_applied
+  # before the CT starts: its config may already mount this directory
+  if input_isolated; then step "input directory $INPUT_ROOT/$CTID" chk_input_dir do_input_dir; fi
+  step "CT running" chk_running do_running
+  step "lxc.conf: input bind, host udev, caps, /dev/shm" chk_raw do_raw
+  restart_if_applied
+  step "CT user '$CT_USER' (video,render,input,wheel)" chk_user do_user
+  if input_isolated; then step "input devices of CT $CTID owned by '$CT_USER'" chk_input_owner do_input_owner; fi
+  step "GPU/uinput passthrough ($(drm_node card 2>/dev/null), $(drm_node renderD 2>/dev/null))" chk_devs do_devs
+  restart_if_applied
+
+  if ((RESTART_CT && !CHECK_ONLY)); then
+    msg_info "Restarting CT (full stop/start to apply config)"
+    { pct stop "$CTID" && pct start "$CTID" && sleep 5; } >>"$LOG" 2>&1 || die "CT restart failed, see $LOG"
+    msg_ok "CT restarted"
+  fi
+}
+
+# ════ install-parts/53-phase-inside.sh ════
+# ── phase: inside the container (system, GPU userspace, Sunshine, Steam) ──
+UDEV_FSTAB_LINE='/mnt/host-udev  /run/udev  none  bind,ro  0 0'
+chk_udevdb() { ct grep -qxF "$UDEV_FSTAB_LINE" /etc/fstab && ct_sh 'ls /run/udev/data | grep -q .'; }
+do_udevdb() {
+  ct_sh "grep -qxF '$UDEV_FSTAB_LINE' /etc/fstab || echo '$UDEV_FSTAB_LINE' >> /etc/fstab"
+  ct_sh 'mountpoint -q /run/udev && ls /run/udev/data >/dev/null 2>&1 || mount /run/udev'
+}
+
+# Sunshine's virtual input devices must be owned by the CT user's uid as seen from the host.
+# With the input guard the CT has its own /dev/input and cdh-input-node sets the owner
+# (51-phase-guard.sh); this rule is only for CTs on the host's shared /dev/input.
+INPUT_RULE=/etc/udev/rules.d/60-lxc-virtual-input.rules
+input_rule_txt() { echo "SUBSYSTEM==\"input\", KERNEL==\"event*\", DEVPATH==\"/devices/virtual/input/*\", OWNER=\"$(host_uid)\", MODE=\"0600\""; }
+chk_inrule() { [[ "$(cat $INPUT_RULE 2>/dev/null)" == "$(input_rule_txt)" ]]; }
+do_inrule()  { input_rule_txt >$INPUT_RULE; udevadm control --reload; }
+
+chk_pkgs() { rpm_missing "${CT_PACKAGES[@]}"; }
+do_pkgs()  { ct dnf install -y "${CT_PACKAGES[@]}"; }
+
+chk_nvuser() { local drv; drv=$(host_driver) && [[ -n $drv ]] && ct test -e "/usr/lib64/libnvidia-glcore.so.$drv"; }
+do_nvuser() {
+  local drv; drv=$(host_driver)
+  ct curl -fsSLo /tmp/nvidia.run "https://download.nvidia.com/XFree86/Linux-x86_64/$drv/NVIDIA-Linux-x86_64-$drv.run"
+  ct sh /tmp/nvidia.run --no-kernel-module --install-compat32-libs -s
+  ct rm -f /tmp/nvidia.run
+}
+
+chk_smi() { ct nvidia-smi -L; }
+
+chk_linger() { ct test -e "/var/lib/systemd/linger/$CT_USER"; }
+do_linger()  { ct loginctl enable-linger "$CT_USER"; }
+
+chk_cdh() {
+  ct test -x /usr/local/bin/cloud-desktop-host || { why "/usr/local/bin/cloud-desktop-host not installed"; return; }
+  [[ "$(awk '$2=="cloud-desktop-host"{print $1}' <<<"$MANIFEST")" == "$(ct sha256sum /usr/local/bin/cloud-desktop-host | cut -d' ' -f1)" ]] \
+    || why "/usr/local/bin/cloud-desktop-host differs from the release/local build"
+}
+do_cdh()  { pct push "$CTID" "$CDH_BIN" /usr/local/bin/cloud-desktop-host --perms 0755; }
+
+chk_scripts() { manifest | pct exec "$CTID" -- sh -c "cd $CT_CDH 2>/dev/null || { echo '$CT_CDH missing'; exit 1; }
+    out=\$(sha256sum -c --quiet - 2>/dev/null); rc=\$?
+    printf '%s\n' \"\$out\" | sed -n 's/: FAILED.*/ differs or is missing/p'; exit \$rc"; }
+do_scripts() {
+  tar -C "$REPO" -c scripts configs | pct exec "$CTID" -- sh -c "mkdir -p $CT_CDH &&
+    tar -C $CT_CDH --no-same-owner --no-same-permissions -x &&
+    chown -R root:root $CT_CDH && chmod -R u=rwX,go=rX $CT_CDH && chmod 0755 $CT_CDH/scripts/*.sh"
+}
+
+# ── Sunshine ──
+# The RPM is named "Sunshine" (capital S): match case-insensitively
+chk_sunshine() { ct_sh 'rpm -qa --qf "%{NAME}\n" | grep -qix sunshine' || why "Sunshine RPM not installed"; }
+latest_sunshine_rpm() {
+  curl -fsSL https://api.github.com/repos/LizardByte/Sunshine/releases/latest \
+    | grep -o '"browser_download_url": *"[^"]*\.fc'"$FEDORA"'\.x86_64\.rpm"' \
+    | head -1 | sed 's/.*"\(https:[^"]*\)"/\1/'
+}
+do_sunshine() {
+  if [[ -z $SUNSHINE_RPM ]]; then
+    SUNSHINE_RPM=$(latest_sunshine_rpm)
+    [[ -n $SUNSHINE_RPM ]] || { echo "no fc$FEDORA x86_64 RPM in latest Sunshine release"; return 1; }
+    echo "Sunshine: $SUNSHINE_RPM"
+  fi
+  ct_install_rpm "$SUNSHINE_RPM" 1   # postinst modprobe/udevadm fail in a CT
+}
+
+chk_ssconf() { ct_user 'test -s ~/.config/sunshine/sunshine.conf && test -s ~/.config/sunshine/apps.json'; }
+do_ssconf() {
+  local ip origins apps=apps-desktop.json
+  ip=$(ct_ip)
+  origins="https://$ip:47990${CSRF_EXTRA:+,$CSRF_EXTRA}"
+  ct_user "mkdir -p ~/.config/sunshine
+    test -s ~/.config/sunshine/sunshine.conf || printf '%s\n' \
+      'capture = wlr' 'encoder = nvenc' 'gamepad = xone' 'system_tray = disabled' \
+      'csrf_allowed_origins = $origins' > ~/.config/sunshine/sunshine.conf"
+  if ct_user 'test -s ~/.config/sunshine/apps.json'; then return 0; fi
+  if ((INSTALL_STEAM)); then apps=apps.json; fi   # no Steam: only the Desktop app
+  ct_user "cp $CT_CDH/configs/sunshine/$apps ~/.config/sunshine/apps.json"
+}
+
+# ── KCM Cloud Mouse ──
+# The default RPM is only built for some Fedora releases: skip with a warning instead of failing.
+chk_cloudmouse() { rpm_missing kcm-cloud-mouse; }
+do_cloudmouse()  { ct_install_rpm "$CLOUD_MOUSE_RPM"; }
+phase_cloudmouse() {
+  if ((CLOUD_MOUSE_DEFAULT)) && ! curl -fsIL -o /dev/null "$CLOUD_MOUSE_RPM"; then
+    msg_warn "KCM Cloud Mouse: no fc$FEDORA build in kcm-cloud-mouse releases, skipped (set CLOUD_MOUSE_RPM=<rpm> to install your own)"
+    return 0
+  fi
+  if [[ $CLOUD_MOUSE_RPM != none ]]; then
+    step "KCM Cloud Mouse (System Settings → Input Devices)" chk_cloudmouse do_cloudmouse
+  fi
+}
+
+# ── Steam ──
+chk_rpmfusion() { rpm_missing rpmfusion-nonfree-release; }
+do_rpmfusion()  { ct dnf install -y "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$FEDORA.noarch.rpm"; }
+chk_steam() { rpm_missing steam gamescope mangohud; }
+do_steam()  { ct dnf install -y steam gamescope mangohud; }
+phase_steam() {
+  if ((INSTALL_STEAM)); then
+    step "RPM Fusion nonfree" chk_rpmfusion do_rpmfusion
+    step "Steam + Gamescope + MangoHud" chk_steam do_steam
+    step "Gamescope has no file caps" "chk_nocaps gamescope" "do_nocaps gamescope"
+  fi
+}
+
+phase_inside() {
+  header "Inside the container"
+  step "host udev db at /run/udev" chk_udevdb do_udevdb
+  if input_isolated; then phase_shared_input_rule
+  else step "host udev rule: Sunshine virtual input → host uid $(host_uid)" chk_inrule do_inrule; fi
+  step "packages (KWin, Plasma, PipeWire, Xwayland…)" chk_pkgs do_pkgs
+  step "NVIDIA userspace $(host_driver || true) (matches host)" chk_nvuser do_nvuser
+  require "nvidia-smi works in CT" chk_smi "check devN entries and driver version, see $LOG"
+  step "linger for '$CT_USER'" chk_linger do_linger
+  step "cloud-desktop-host binary" chk_cdh do_cdh
+  step "CDH scripts + configs in $CT_CDH" chk_scripts do_scripts
+  step "Sunshine" chk_sunshine do_sunshine
+  step "Sunshine has no file caps (AT_SECURE breaks ENet)" "chk_nocaps sunshine" "do_nocaps sunshine"
+  step "Sunshine config (kept if it already exists)" chk_ssconf do_ssconf
+  phase_cloudmouse
+  phase_steam
+}
+
+# ════ install-parts/54-phase-services.sh ════
+# ── phase: user service ────────────────────────────────────────
+# The whole stack (compositor, KWin, Plasma, Sunshine) as a user service,
+# started at boot thanks to linger. Last, so it starts with everything installed.
+SESSION_UNIT=cloud-desktop-host.service
+SESSION_UNIT_FILE=/etc/systemd/user/$SESSION_UNIT
+session_unit_txt() {
+  cat <<EOF
+[Unit]
+Description=cloud-desktop-host session (compositor, KWin, Plasma, Sunshine)
+
+[Service]
+Type=simple
+# run.sh starts its own D-Bus session (dbus-launch) when this is unset
+UnsetEnvironment=DBUS_SESSION_BUS_ADDRESS
+ExecStart=$CT_CDH/scripts/run.sh
+# run.sh exits when the compositor dies: bring the whole stack back
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+}
+chk_session() {
+  [[ "$(ct cat "$SESSION_UNIT_FILE" 2>/dev/null)" == "$(session_unit_txt)" ]] \
+    || { why "$SESSION_UNIT_FILE missing or outdated"; return; }
+  ct_systemctl is-enabled -q "$SESSION_UNIT" || why "$SESSION_UNIT not enabled for '$CT_USER'"
+}
+do_session() {
+  session_unit_txt | pct exec "$CTID" -- sh -c "mkdir -p ${SESSION_UNIT_FILE%/*} && cat > $SESSION_UNIT_FILE"
+  ct rm -f /etc/systemd/user/cdh-sunshine.service   # earlier Sunshine-only unit
+  ct_systemctl daemon-reload
+  ct_systemctl enable --now "$SESSION_UNIT"
+}
+
+phase_services() {
+  step "user service $SESSION_UNIT (starts at boot)" chk_session do_session
+}
+
+phase_summary() {
+  local ip
+  echo
+  if ((CHECK_ONLY)); then
+    if ((NEEDED)); then echo "${YW}$NEEDED step(s) needed.${CL} Run without --check to apply."
+    else echo "${GN}Everything is in place.${CL}"; fi
+    return 0
+  fi
+  ip=$(ct_ip)
+  cat <<EOF
+${GN}Done.${CL} Log: $LOG
+  Session: runs at boot as $CT_USER's user service $SESSION_UNIT. Control it with:
+    pct exec $CTID -- runuser -l $CT_USER -c 'XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user restart $SESSION_UNIT'
+    logs: journalctl --user -u $SESSION_UNIT, and /tmp/cdhost-logs/ in the CT
+  Web UI:  https://$ip:47990   (create the Sunshine login on first visit)
+  Moonlight: add $ip, enter the PIN in the web UI.
+  Set a password for '$CT_USER' if you need it:  pct exec $CTID -- passwd $CT_USER
+EOF
+}
+
+# ════ install-parts/60-main.sh ════
 # ── main: the order of things lives here ───────────────────────
 # To add a step: write chk_*/do_* in the matching phase part and call `step` from its
-# phase_* function. A new phase = a new parts/NN-*.sh file + one line below.
+# phase_* function. A new phase = a new install-parts/NN-*.sh file + one line below.
 main() {
   parse_args "$@"
   trap 'rm -rf "${BUNDLE_TMP:-}"' EXIT

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds pve/install.sh by concatenating pve/parts/*.sh in name order.
+# Builds pve/install.sh by concatenating pve/install-parts/*.sh in name order.
 #
 # install.sh stays ONE self-contained file (committed, shipped in the release
 # bundle) because it is run as `bash -c "$(curl …/pve/install.sh)"` and can't

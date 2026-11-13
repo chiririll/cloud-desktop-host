@@ -25,7 +25,7 @@ chk_running() { ct_up; }
 do_running()  { pct start "$CTID"; sleep 5; }
 
 # The CT's /dev/input: its own directory, filled by the host with the devices the CT
-# created (74-phase-guard.sh). Without the input guard nobody knows who created a
+# created (51-phase-guard.sh). Without the input guard nobody knows who created a
 # device, so the CT gets the host's /dev/input, which every such CT shares.
 input_mount() {
   if input_isolated; then echo "lxc.mount.entry: $INPUT_ROOT/$CTID dev/input none bind,create=dir"

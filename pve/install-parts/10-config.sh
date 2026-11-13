@@ -45,7 +45,7 @@ CT_PACKAGES=(dbus-daemon dbus-tools dbus-x11 pipewire wireplumber pipewire-pulse
 CHECK_ONLY=0
 CONF=''          # /etc/pve/lxc/<CTID>.conf
 CT_NAME=''       # hostname of the CT if it already exists, empty = will be created
-MANIFEST=''      # "sha256  path" lines of the release bundle, see 50-release.sh
+MANIFEST=''      # "sha256  path" lines of the release bundle, see 30-release.sh
 BUNDLE_TMP=''    # temp dir of the downloaded bundle, removed on exit
 NEEDED=0         # steps still needed (--check)
 RESTART_CT=0     # a step changed the CT config: restart before going inside
