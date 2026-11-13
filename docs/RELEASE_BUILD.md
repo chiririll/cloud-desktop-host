@@ -52,7 +52,7 @@ The binary links against the Fedora release it was built on, so build it for the
 4. Strips the binary and checks that it does not link to a shared wlroots.
 5. Exports only the binary (the last stage is `FROM scratch`), so `-o dist` writes a single file.
 
-`.dockerignore` keeps `build/`, `dist/`, `.git` and the Sunshine and Gamescope submodules out of the build context.
+`.dockerignore` keeps `build/`, `dist/`, `.git` out of the build context.
 
 ### Runtime dependencies
 

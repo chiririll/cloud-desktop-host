@@ -41,5 +41,5 @@ Thumbs.db
 *.bak
 
 # Не коммитить вложенные .git внутри каталогов (субмодули задаются через .gitmodules)
-# Примечание: сами subprojects/wlroots и subprojects/gamescope — официальные git submodules.
+# Примечание: subprojects/wlroots — официальный git submodule.
 dist
