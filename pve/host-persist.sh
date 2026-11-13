@@ -13,6 +13,7 @@
 #   /etc/modprobe.d/nvidia-drm.conf         options nvidia-drm modeset=1 (+ update-initramfs -u)
 #   /etc/modules-load.d/uinput.conf         uinput
 #   /etc/modules-load.d/nvidia-uvm.conf     nvidia_uvm
+#   /etc/modules-load.d/cdh_input_guard.conf  cdh_input_guard (only if install.sh installed it for this kernel)
 #   /etc/udev/rules.d/70-nvidia-uvm.rules   creates /dev/nvidia-uvm when the module loads
 # Each step: check → (apply if needed) → check again. Safe to re-run.
 set -euo pipefail
@@ -92,6 +93,16 @@ do_uvm() {
   nvidia-modprobe -c0 -u
 }
 step "nvidia-uvm module + device node at boot" chk_uvm do_uvm
+
+# the module itself is installed by install.sh; without it for this kernel, modules-load.d would only log an error
+GUARD_LOAD=/etc/modules-load.d/cdh_input_guard.conf
+chk_guard() { mod_persisted cdh_input_guard || why "cdh_input_guard not in /etc/modules-load.d"; }
+do_guard()  { echo cdh_input_guard >"$GUARD_LOAD"; }
+if [[ -f /lib/modules/$(uname -r)/extra/cdh_input_guard.ko ]]; then
+  step "cdh_input_guard loaded at boot" chk_guard do_guard
+else
+  msg_warn "cdh_input_guard.ko not installed for $(uname -r): run pve/install.sh first to load it at boot"
+fi
 
 echo
 if ((CHECK_ONLY)); then

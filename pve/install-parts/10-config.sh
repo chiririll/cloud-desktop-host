@@ -21,6 +21,10 @@ CSRF_EXTRA=${CSRF_EXTRA:-}
 
 CDH_GH_REPO=${CDH_GH_REPO:-chiririll/cloud-desktop-host}
 CDH_VERSION=${CDH_VERSION:-}
+# host kernel module that keeps container input away from the host console
+INSTALL_INPUT_GUARD=${INSTALL_INPUT_GUARD:-1}
+CDH_GUARD_REPO=${CDH_GUARD_REPO:-chiririll/cdh-input-guard}
+CDH_GUARD_VERSION=${CDH_GUARD_VERSION:-}   # empty = latest release
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/.." && pwd)
 CDH_BIN=$REPO/dist/cloud-desktop-host
 # empty = resolve the latest Sunshine release's fc$FEDORA asset at install time

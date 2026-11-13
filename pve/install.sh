@@ -28,6 +28,8 @@
 #   CDH_VERSION=v1.0.0   use this release (default: local dist/, else latest)
 #   CDH_GH_REPO=chiririll/cloud-desktop-host   SUNSHINE_RPM=<url or local .rpm>
 #   CLOUD_MOUSE_RPM=<url or local .rpm>   (default: latest kcm-cloud-mouse release for the Fedora version, skipped with a warning if there is none; "none" to skip)
+#   INSTALL_INPUT_GUARD=0   don't install the cdh_input_guard host kernel module (default 1)
+#   CDH_GUARD_REPO, CDH_GUARD_VERSION   where the module release comes from
 #   CSRF_EXTRA=https://gaming.example.org   extra Sunshine web UI origins
 set -euo pipefail
 
@@ -55,6 +57,10 @@ CSRF_EXTRA=${CSRF_EXTRA:-}
 
 CDH_GH_REPO=${CDH_GH_REPO:-chiririll/cloud-desktop-host}
 CDH_VERSION=${CDH_VERSION:-}
+# host kernel module that keeps container input away from the host console
+INSTALL_INPUT_GUARD=${INSTALL_INPUT_GUARD:-1}
+CDH_GUARD_REPO=${CDH_GUARD_REPO:-chiririll/cdh-input-guard}
+CDH_GUARD_VERSION=${CDH_GUARD_VERSION:-}   # empty = latest release
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/.." && pwd)
 CDH_BIN=$REPO/dist/cloud-desktop-host
 # empty = resolve the latest Sunshine release's fc$FEDORA asset at install time
@@ -713,6 +719,70 @@ ${GN}Done.${CL} Log: $LOG
 EOF
 }
 
+# ════ install-parts/74-phase-guard.sh ════
+# ── phase: input guard kernel module (skipped with INSTALL_INPUT_GUARD=0) ──
+# cdh_input_guard (github.com/chiririll/cdh-input-guard) keeps virtual input devices
+# away from the host console. The release has one cdh_input_guard-<kver>.ko per Proxmox
+# kernel, the udev rule and SHA256SUMS. Loaded for the current boot only; loading it
+# at boot is pve/host-persist.sh.
+GUARD_KVER=$(uname -r)
+GUARD_KO_NAME=cdh_input_guard-$GUARD_KVER.ko
+GUARD_KO=/lib/modules/$GUARD_KVER/extra/cdh_input_guard.ko
+GUARD_RULE_NAME=71-cdh-virtual-input.rules
+GUARD_RULE=/etc/udev/rules.d/$GUARD_RULE_NAME
+GUARD_LOAD=/etc/modules-load.d/cdh_input_guard.conf   # written by host-persist.sh
+
+guard_base() {
+  if [[ -z $CDH_GUARD_VERSION || $CDH_GUARD_VERSION == latest ]]; then
+    echo "https://github.com/$CDH_GUARD_REPO/releases/latest/download"
+  else
+    echo "https://github.com/$CDH_GUARD_REPO/releases/download/$CDH_GUARD_VERSION"
+  fi
+}
+guard_fetch() { curl -fsSL "$(guard_base)/$1"; }
+
+# expected sha256 of a release asset
+guard_sum() {
+  local sums sum
+  sums=$(guard_fetch SHA256SUMS) || { echo "cannot fetch SHA256SUMS from $CDH_GUARD_REPO (${CDH_GUARD_VERSION:-latest})" >&2; return 1; }
+  sum=$(awk -v f="$1" '$2 == f {print $1}' <<<"$sums")
+  [[ -n $sum ]] || { echo "release has no $1 (no module built for kernel $GUARD_KVER?)" >&2; return 1; }
+  echo "$sum"
+}
+
+# chk_guard_file <asset> <dest>: installed file matches the release
+chk_guard_file() {
+  local want; want=$(guard_sum "$1") || return 1
+  [[ -f $2 && $(sha256sum <"$2" | cut -d' ' -f1) == "$want" ]] || why "$2 missing or differs from the release"
+}
+do_guard_file() {
+  local want tmp; want=$(guard_sum "$1")
+  tmp=$(mktemp)
+  guard_fetch "$1" >"$tmp"
+  [[ $(sha256sum <"$tmp" | cut -d' ' -f1) == "$want" ]] || { rm -f "$tmp"; echo "sha256 mismatch for $1"; return 1; }
+  install -D -m 0644 "$tmp" "$2"; rm -f "$tmp"
+  case $2 in
+    *.ko)    depmod -a "$GUARD_KVER" ;;
+    *.rules) udevadm control --reload ;;
+  esac
+}
+
+chk_guard_loaded() { [[ -d /sys/module/cdh_input_guard ]] || why "cdh_input_guard not loaded"; }
+do_guard_loaded()  { modprobe cdh_input_guard; }
+
+phase_guard() {
+  [[ $INSTALL_INPUT_GUARD != 0 ]] || return 0
+  header "Input guard (kernel $GUARD_KVER)"
+  step "cdh_input_guard.ko for this kernel" chk_guard_file "$GUARD_KO_NAME" "$GUARD_KO"
+  step "udev rule $GUARD_RULE_NAME" chk_guard_file "$GUARD_RULE_NAME" "$GUARD_RULE"
+  step "cdh_input_guard loaded" chk_guard_loaded do_guard_loaded
+  if grep -qsxF cdh_input_guard "$GUARD_LOAD"; then
+    msg_ok "cdh_input_guard loaded at boot"
+  else
+    msg_warn "cdh_input_guard not loaded at boot, load it before starting the CT (or run $PERSIST_HINT)"
+  fi
+}
+
 # ════ install-parts/90-main.sh ════
 # ── main: the order of things lives here ───────────────────────
 # To add a step: write chk_*/do_* in the matching phase part and call `step` from its
@@ -731,6 +801,7 @@ main() {
   resolve_options
 
   phase_host
+  phase_guard
   phase_container
   phase_inside
   phase_services

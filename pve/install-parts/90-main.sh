@@ -15,6 +15,7 @@ main() {
   resolve_options
 
   phase_host
+  phase_guard
   phase_container
   phase_inside
   phase_services
