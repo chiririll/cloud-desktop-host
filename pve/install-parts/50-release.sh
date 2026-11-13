@@ -8,8 +8,13 @@ release_base() {
     echo "https://github.com/$CDH_GH_REPO/releases/download/$CDH_VERSION"
   fi
 }
+# The release MANIFEST has one binary line per Fedora (cloud-desktop-host-fcNN-x86_64); keep ours
+# under the plain name used by local_manifest and drop the others.
 fetch_manifest() {
-  MANIFEST=$(curl -fsSL "$(release_base)/MANIFEST-fc$FEDORA") && [[ -n $MANIFEST ]]
+  local raw
+  raw=$(curl -fsSL "$(release_base)/MANIFEST") || return 1
+  MANIFEST=$(sed -n -e "s|  cloud-desktop-host-fc$FEDORA-x86_64\$|  cloud-desktop-host|p" -e '/  cloud-desktop-host-fc/d;/  \(scripts\|configs\)\//p' <<<"$raw")
+  [[ -n $MANIFEST ]]
 }
 local_manifest() {
   printf '%s  cloud-desktop-host\n' "$(sha256sum <"$CDH_BIN" | cut -d' ' -f1)"
@@ -22,7 +27,7 @@ fetch_release() {
   base=$(release_base)
   BUNDLE_TMP=$(mktemp -d /tmp/cdh-release.XXXXXX)
   curl -fsSL -o "$BUNDLE_TMP/$asset" "$base/$asset" || return 1
-  curl -fsSL -o "$BUNDLE_TMP/SHA256SUMS" "$base/SHA256SUMS-fc$FEDORA" || return 1
+  curl -fsSL -o "$BUNDLE_TMP/SHA256SUMS" "$base/SHA256SUMS" || return 1
   (cd "$BUNDLE_TMP" && grep " $asset\$" SHA256SUMS | sha256sum -c --quiet -) || return 1
   tar -C "$BUNDLE_TMP" -xzf "$BUNDLE_TMP/$asset"
   REPO=$BUNDLE_TMP/cdh CDH_BIN=$BUNDLE_TMP/cdh/cloud-desktop-host

@@ -73,7 +73,7 @@ At the end the script prints the CT's IP, how to start the stack, and the Sunshi
 
 | Situation | Source |
 |---|---|
-| Run via `curl`, or from a checkout without `dist/` | latest GitHub release `cdh-fc$FEDORA-x86_64.tar.gz`, verified against `SHA256SUMS-fc$FEDORA` |
+| Run via `curl`, or from a checkout without `dist/` | latest GitHub release `cdh-fc$FEDORA-x86_64.tar.gz`, verified against `SHA256SUMS` |
 | `CDH_VERSION=v1.0.0` | that release |
 | Run from a checkout that has `dist/cloud-desktop-host` | the local build plus the checkout's `scripts/` and `configs/` |
 

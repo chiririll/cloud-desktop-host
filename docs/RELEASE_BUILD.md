@@ -103,14 +103,14 @@ The workflow:
 
 1. Checks out the repo and fetches only `subprojects/wlroots`.
 2. Runs the same `docker build` as above once per Fedora release in the workflow matrix (43, 44, 45).
-3. Packages and uploads these files to the release for that tag (it creates the release if needed, with generated notes):
+3. Once every Fedora build succeeded, a final `release` job writes one `MANIFEST` and one `SHA256SUMS` and creates the release for that tag with generated notes (so a failed build never leaves a partial release):
 
    | Asset | Contents |
    |---|---|
    | `cdh-fc<N>-x86_64.tar.gz` | `cdh/cloud-desktop-host`, `cdh/scripts/`, `cdh/configs/`, `cdh/pve/install.sh`, `cdh/pve/host-persist.sh` |
    | `cloud-desktop-host-fc<N>-x86_64` | the bare binary |
-   | `MANIFEST-fc<N>` | checksums of the binary, scripts and configs (used by `--check`) |
-   | `SHA256SUMS-fc<N>` | checksums of the bundle and the bare binary |
+   | `MANIFEST` | checksums of every `cloud-desktop-host-fc<N>-x86_64` binary plus `scripts/` and `configs/` (used by `--check`) |
+   | `SHA256SUMS` | checksums of all bundles, bare binaries and `MANIFEST` |
 
 Asset names have no version, so the newest release is always at:
 
@@ -118,16 +118,16 @@ Asset names have no version, so the newest release is always at:
 https://github.com/chiririll/cloud-desktop-host/releases/latest/download/cdh-fc43-x86_64.tar.gz
 ```
 
-Re-pushing a tag, or re-running the workflow for it, replaces the assets (`--clobber`).
+Releases are created once: to redo one, delete the release (and tag) first, then push the tag again.
 
-A manual run (**Actions → release → Run workflow**) builds the same files and keeps them as a workflow artifact. It does not publish a release, which makes it handy for testing a branch.
+A manual run (**Actions → release → Run workflow**) builds the same files and keeps them as workflow artifacts. It does not publish a release, which makes it handy for testing a branch.
 
 ### Downloading by hand
 
 ```bash
 base=https://github.com/chiririll/cloud-desktop-host/releases/latest/download
-curl -fLO $base/cdh-fc43-x86_64.tar.gz -fLO $base/SHA256SUMS-fc43
-sha256sum -c --ignore-missing SHA256SUMS-fc43
+curl -fLO $base/cdh-fc43-x86_64.tar.gz -fLO $base/SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
 tar -xzf cdh-fc43-x86_64.tar.gz      # → cdh/
 ```
 

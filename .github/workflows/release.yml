@@ -1,5 +1,6 @@
 # Push a tag like v0.1.0 → builds the CT bundle and attaches it to a GitHub release.
-# One matrix job per Fedora release; each uploads its own fcNN assets.
+# One matrix job per Fedora release builds its fcNN binary + bundle; a final job (only if all builds
+# succeeded) writes the single MANIFEST + SHA256SUMS and creates the release — no partial releases.
 # Asset names carry no version, so .../releases/latest/download/<name> always works.
 name: release
 
@@ -34,33 +35,44 @@ jobs:
 
       - name: Package
         run: |
-          B=cdh-fc$FEDORA-x86_64
-          mkdir -p pkg/cdh/pve
+          mkdir -p pkg/cdh/pve dist
           cp dist/cloud-desktop-host pkg/cdh/
           cp -r scripts configs pkg/cdh/
           cp pve/install.sh pve/host-persist.sh pkg/cdh/pve/
-          tar -C pkg -czf $B.tar.gz cdh
-          cp dist/cloud-desktop-host cloud-desktop-host-fc$FEDORA-x86_64
-          (cd pkg/cdh && { sha256sum cloud-desktop-host; find scripts configs -type f | sort | xargs sha256sum; }) > MANIFEST-fc$FEDORA
-          sha256sum $B.tar.gz cloud-desktop-host-fc$FEDORA-x86_64 MANIFEST-fc$FEDORA > SHA256SUMS-fc$FEDORA
-          cat SHA256SUMS-fc$FEDORA
+          tar -C pkg -czf dist/cdh-fc$FEDORA-x86_64.tar.gz cdh
+          mv dist/cloud-desktop-host dist/cloud-desktop-host-fc$FEDORA-x86_64
 
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          files="cdh-fc$FEDORA-x86_64.tar.gz cloud-desktop-host-fc$FEDORA-x86_64 MANIFEST-fc$FEDORA SHA256SUMS-fc$FEDORA"
-          # matrix jobs run in parallel: whoever is first creates the release, the others upload
-          gh release create "$GITHUB_REF_NAME" $files --generate-notes 2>/dev/null \
-            || gh release upload "$GITHUB_REF_NAME" $files --clobber
-
-      - name: Keep artifacts (manual runs)
-        if: "!startsWith(github.ref, 'refs/tags/')"
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: cdh-fc${{ env.FEDORA }}-x86_64
-          path: |
-            cdh-fc${{ env.FEDORA }}-x86_64.tar.gz
-            MANIFEST-fc${{ env.FEDORA }}
-            SHA256SUMS-fc${{ env.FEDORA }}
+          name: build-fc${{ matrix.fedora }}
+          path: dist/*
+          if-no-files-found: error
+
+  # runs only if every build succeeded: one MANIFEST, one SHA256SUMS, one release
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: build-fc*
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          # MANIFEST (used by `install.sh --check`): one binary line per Fedora, plus the scripts/configs
+          # shared by all of them. install.sh picks its own cloud-desktop-host-fcNN-x86_64 line.
+          { (cd dist && sha256sum cloud-desktop-host-fc*-x86_64)
+            sha256sum $(find scripts configs -type f | sort)
+          } > dist/MANIFEST
+          (cd dist && sha256sum cdh-fc*-x86_64.tar.gz cloud-desktop-host-fc*-x86_64 MANIFEST > SHA256SUMS && cat SHA256SUMS)
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
