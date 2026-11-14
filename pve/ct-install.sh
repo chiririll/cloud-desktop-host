@@ -357,7 +357,7 @@ ubuntu_ct_packages() {
 ubuntu_steam_packages() { printf '%s\n' steam-installer gamescope mangohud; }   # after i386 + multiverse
 ubuntu_admin_group() { echo sudo; }
 ubuntu_pkg_ext() { echo deb; }
-ubuntu_sunshine_pattern() { echo "ubuntu-${DISTRO_VERSION//./\\.}-amd64\\.deb"; }
+ubuntu_sunshine_pattern() { echo "ubuntu${DISTRO_VERSION//./\\.}_amd64\\.deb"; }   # sunshine_<ver>-1+ubuntu26.04_amd64.deb
 ubuntu_sunshine_missing_hint() {
   echo "Build Sunshine from subprojects/sunshine (docs/BUILD.md) and pass it as SUNSHINE_PKG=<file.deb>."
 }
@@ -601,7 +601,10 @@ do_user() {
 }
 
 # the .run installer puts the libraries in /usr/lib64 (Fedora) or /usr/lib/x86_64-linux-gnu (Debian)
-nv_libs_present() { ls /usr/lib64/libnvidia-glcore.so."$1" /usr/lib/x86_64-linux-gnu/libnvidia-glcore.so."$1" >/dev/null 2>&1; }
+nv_libs_present() {   # any one path is enough (ls fails if one of several is missing); libnvidia-glcore is gone in new drivers
+  local f; for f in /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib; do [[ -e $f/libGLX_nvidia.so.$1 ]] && return 0; done
+  return 1
+}
 chk_nvuser() {
   local drv; drv=$(host_driver) || { why "cannot read the host's NVIDIA driver version (/sys/module/nvidia, /proc/driver/nvidia)"; return; }
   nv_libs_present "$drv" || why "NVIDIA userspace $drv not installed"
@@ -609,7 +612,8 @@ chk_nvuser() {
 do_nvuser() {
   local drv; drv=$(host_driver)
   curl -fsSLo /tmp/nvidia.run "https://download.nvidia.com/XFree86/Linux-x86_64/$drv/NVIDIA-Linux-x86_64-$drv.run"
-  sh /tmp/nvidia.run --no-kernel-module --install-compat32-libs -s
+  mkdir -p /usr/share/glvnd/egl_vendor.d   # the installer cannot find it without pkg-config + libglvnd-dev
+  sh /tmp/nvidia.run --no-kernel-module --install-compat32-libs --glvnd-egl-config-path=/usr/share/glvnd/egl_vendor.d -s
   rm -f /tmp/nvidia.run
 }
 

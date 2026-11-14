@@ -10,7 +10,7 @@ ubuntu_ct_packages() {
 ubuntu_steam_packages() { printf '%s\n' steam-installer gamescope mangohud; }   # after i386 + multiverse
 ubuntu_admin_group() { echo sudo; }
 ubuntu_pkg_ext() { echo deb; }
-ubuntu_sunshine_pattern() { echo "ubuntu-${DISTRO_VERSION//./\\.}-amd64\\.deb"; }
+ubuntu_sunshine_pattern() { echo "ubuntu${DISTRO_VERSION//./\\.}_amd64\\.deb"; }   # sunshine_<ver>-1+ubuntu26.04_amd64.deb
 ubuntu_sunshine_missing_hint() {
   echo "Build Sunshine from subprojects/sunshine (docs/BUILD.md) and pass it as SUNSHINE_PKG=<file.deb>."
 }
