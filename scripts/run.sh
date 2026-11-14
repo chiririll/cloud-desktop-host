@@ -14,7 +14,6 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
-# shellcheck source=lib.sh
 . "$SCRIPT_DIR/lib.sh"
 
 # ── Arguments ──────────────────────────────────────────────────
