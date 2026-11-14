@@ -14,6 +14,7 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+# shellcheck source=lib.sh
 . "$SCRIPT_DIR/lib.sh"
 
 # ── Arguments ──────────────────────────────────────────────────
@@ -58,6 +59,7 @@ fi
 
 # ── Cleanup ────────────────────────────────────────────────────
 DBUS_LAUNCHED=0
+# shellcheck disable=SC2317  # invoked via trap
 cleanup() {
     local rc=$?
     trap - EXIT INT TERM

@@ -11,7 +11,7 @@ cdh_env() {
     export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
     export CDH_LOG_DIR="${CDH_LOG_DIR:-/tmp/cdhost-logs/latest}"
     export CDH_STATE_DIR="$XDG_RUNTIME_DIR/cdh"
-    mkdir -p -m 700 "$CDH_STATE_DIR"
+    mkdir -p "$CDH_STATE_DIR" && chmod 700 "$CDH_STATE_DIR"
     # xdg-open (Electron, GTK apps…) picks kde-open only when these are set
     export QT_QPA_PLATFORMTHEME=kde XDG_CURRENT_DESKTOP=KDE XDG_SESSION_DESKTOP=KDE
     export KDE_SESSION_VERSION=6 KDE_FULL_SESSION=true

@@ -5,6 +5,7 @@
 
 set -u
 SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+# shellcheck source=lib.sh
 . "$SCRIPT_DIR/lib.sh"
 cdh_env
 mkdir -p "$CDH_LOG_DIR"
