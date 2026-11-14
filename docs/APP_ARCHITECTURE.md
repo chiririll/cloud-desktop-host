@@ -202,12 +202,11 @@ run.sh
     PipeWire / WirePlumber / pipewire-pulse
     kactivitymanagerd
     CDH
-    KWin + XWayland
-    kded6 / plasmashell / polkit
     Sunshine
+    (общие функции — scripts/lib.sh; логи — /tmp/cdhost-logs/<время>/)
 
 Sunshine app: Desktop
-    sunshine-prep-desktop.sh
+    sunshine-prep-desktop.sh   (KWin + XWayland, kded6 / plasmashell / polkit)
     sunshine-undo-desktop.sh
 
 Sunshine app: Steam Deck Mode

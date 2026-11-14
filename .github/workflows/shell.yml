@@ -1,0 +1,15 @@
+name: shell
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n
+        run: for f in scripts/*.sh; do bash -n "$f"; done
+      - name: shellcheck
+        run: shellcheck -x scripts/*.sh

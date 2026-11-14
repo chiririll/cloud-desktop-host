@@ -421,7 +421,7 @@ chmod +x /home/user/cloud-desktop-host/scripts/*.sh
 #### II.8.1 Desktop Mode (Plasma + KWin)
 
 Основной скрипт: [`scripts/run.sh`](../scripts/run.sh)  
-Альтернатива (без логов): [`scripts/run-nolog.sh`](../scripts/run-nolog.sh)
+Без логов: `./scripts/run.sh --no-log` (KWin и Plasma поднимает prep-скрипт при подключении)
 
 ```bash
 su - user
@@ -443,14 +443,14 @@ cd /home/user/cloud-desktop-host
 9. Sunshine (WAYLAND_DISPLAY=wayland-cd)
 ```
 
-Логи пишутся в `/tmp/cdhost-logs/`.
+Логи пишутся в `/tmp/cdhost-logs/<время>/` (последние 5 запусков, ссылка `latest`).
 
 #### II.8.2 Steam GamepadUI Mode
 
-Скрипт: [`scripts/run-steam.sh`](../scripts/run-steam.sh)
+Скрипт: [`scripts/run.sh --steam`](../scripts/run.sh)
 
 ```bash
-./scripts/run-steam.sh
+./scripts/run.sh --steam
 ```
 
 Запускает CDH с `--no-auto-lock`, Xwayland fullscreen на `:0`, Steam с `-gamepadui`.
@@ -577,15 +577,13 @@ systemctl --user status cloud-desktop.service
 
 | Что проверять | Где смотреть |
 |---------------|-------------|
-| Лог CDH (Desktop) | `/tmp/cdhost-logs/compositor.log` или `/tmp/cdh.log` |
-| Лог CDH (Steam) | `/tmp/cdh-steam.log` |
-| Prep Desktop | `/tmp/prep-desktop.log` |
-| Prep Gamescope | `/tmp/prep-gamescope.log` |
-| Prep Cmd | `/tmp/prep-cmd.log` |
-| Gamescope | `/tmp/gamescope.log` |
-| Sunshine | `/tmp/cdhost-logs/sunshine.log` |
-| KWin | `/tmp/cdhost-logs/kwin.log` |
-| PipeWire | `/tmp/cdhost-logs/pipewire.log` |
+| Лог CDH | `/tmp/cdhost-logs/latest/compositor.log` |
+| Prep Desktop | `/tmp/cdhost-logs/latest/prep-desktop.log` |
+| Prep Gamescope | `/tmp/cdhost-logs/latest/prep-gamescope.log` |
+| Gamescope | `/tmp/cdhost-logs/latest/gamescope.log` |
+| Sunshine | `/tmp/cdhost-logs/latest/sunshine.log` |
+| KWin | `/tmp/cdhost-logs/latest/kwin.log` |
+| PipeWire | `/tmp/cdhost-logs/latest/pipewire.log` |
 | HUD overlay | запустить CDH с `--hud` → оверлей FPS/commit rate в стриме |
 | Verbose wlroots | запустить CDH с `--debug` |
 
@@ -610,7 +608,7 @@ busctl --user list | grep gamescope
 | `FAIL: no wayland-cd` | CDH не запустился | Проверить `/tmp/cdh.log`, права на устройства |
 | `busctl: service not found` | CDH не запустил D-Bus сервис | CDH должен быть запущен перед prep-скриптом |
 | Чёрный экран в Moonlight | KWin не подключился к CDH | `WAYLAND_DISPLAY=wayland-cd` в env KWin |
-| Desktop: цветные переливы (RGB-анимация) вместо рабочего стола | `kwin_wayland` не стартует (EPERM): метка `cap_sys_nice=ep`, а `sys_nice` вырезан из bounding set контейнера (дефолт `lxc-pve 7.0+`). В `/tmp/prep-desktop.log` видно `DISPLAY=N/A` и падение Plasma | Вернуть `sys_nice` в bounding set — override `lxc.cap.drop` в `/etc/pve/lxc/120.conf` (см. §I.4), затем `pct stop 120 && pct start 120` |
+| Desktop: цветные переливы (RGB-анимация) вместо рабочего стола | `kwin_wayland` не стартует (EPERM): метка `cap_sys_nice=ep`, а `sys_nice` вырезан из bounding set контейнера (дефолт `lxc-pve 7.0+`). В `/tmp/cdhost-logs/latest/prep-desktop.log` видно `DISPLAY=N/A` и падение Plasma | Вернуть `sys_nice` в bounding set — override `lxc.cap.drop` в `/etc/pve/lxc/120.conf` (см. §I.4), затем `pct stop 120 && pct start 120` |
 | Нет звука | PipeWire не запустился или `/dev/snd` не примаплен | Проверить `lxc.mount.entry: /dev/snd` и `lxc.cgroup2.devices.allow: c 116:*` |
 | NVENC недоступен | Версии драйвера хоста/контейнера различаются | Установить одинаковые версии; проверить `nvidia-smi` в контейнере |
 | Gamescope не видит Wayland | `WAYLAND_DISPLAY` не задан | Задать `WAYLAND_DISPLAY=wayland-cd` перед запуском Gamescope |

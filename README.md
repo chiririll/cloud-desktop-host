@@ -118,12 +118,10 @@ cloud-desktop-host/
 │   ├── dbus_input.cpp           # D-Bus org.gamescope.Input (730 строк)
 │   └── debug_ui.cpp             # HUD overlay с растровым шрифтом
 ├── scripts/
-│   ├── run.sh                   # полный запуск стека (Desktop)
-│   ├── run-nolog.sh             # быстрый запуск без логов
-│   ├── run-steam.sh             # Steam GamepadUI (--no-auto-lock)
+│   ├── lib.sh                   # общие функции (подключается через source)
+│   ├── run.sh                   # базовый стек; флаги --no-log, --steam, hud, debug
 │   ├── sunshine-prep-desktop.sh # prep: KWin + Plasma
 │   ├── sunshine-prep-gamescope.sh # prep: Gamescope + Steam -steamos3
-│   ├── sunshine-prep-cmd.sh     # prep: SetOutputMode + plasmashell --replace
 │   ├── sunshine-undo-desktop.sh # undo: kill Plasma stack
 │   └── sunshine-undo-gamescope.sh # undo: kill Gamescope + Steam + Xwayland
 ├── tools/
@@ -186,7 +184,7 @@ cd cloud-desktop-host
 meson setup build
 ninja -C build
 
-# Запустить стек (Desktop режим)
+# Запустить базовый стек (KWin/Plasma поднимает prep-скрипт при подключении)
 ./scripts/run.sh
 ```
 

@@ -80,11 +80,11 @@ docker start -a cdhtest; docker rm cdhtest
 pct push 180 dist/cloud-desktop-host /usr/local/bin/cloud-desktop-host --perms 0755
 ```
 
-`scripts/run.sh`, `run-nolog.sh` and `run-steam.sh` look for the binary in this order:
+`scripts/run.sh` and `scripts/sunshine-prep-gamescope.sh` look for the binary in this order:
 
 1. `$CDH_BIN`
 2. `cloud-desktop-host` on `PATH` (e.g. `/usr/local/bin`)
-3. `~/cloud-desktop-host/build/cloud-desktop-host` (in-container build)
+3. `scripts/../build/cloud-desktop-host` (in-repo build)
 
 ---
 

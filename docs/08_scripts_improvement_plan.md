@@ -1,6 +1,6 @@
 # Scripts improvement plan
 
-Status: proposal, nothing implemented. Based on a read of `scripts/*.sh` as of 2026-11-14, including the uncommitted rewrite of `sunshine-undo-desktop.sh` that now stops KWin and Xwayland on "Stop". Items marked **unverified** are assumptions to check in a container before relying on them.
+Status: implemented (phases 1 to 5) in the working tree; the verification table below still has to be run in a test container. Open questions 1 and 2 were resolved by porting `--steam` and keeping `--no-log`; 3 and 4 are left open. Based on a read of `scripts/*.sh` as of 2026-11-14, including the uncommitted rewrite of `sunshine-undo-desktop.sh` that now stops KWin and Xwayland on "Stop". Items marked **unverified** are assumptions to check in a container before relying on them.
 
 ## Goals
 
@@ -68,6 +68,7 @@ No installer change is needed: `do_scripts` copies `scripts/` whole and the MANI
 | `stop_procs [-t seconds] <name...>` | SIGTERM, poll until gone, SIGKILL what is left. |
 | `x_displays`, `wait_new_x_display` | Display detection by snapshot. |
 | `set_output_mode <w> <h> <fps>` | The `busctl` call to `org.gamescope.Input`. |
+| `set_idle <true\|false>` | `SetIdle` on `org.gamescope.Input`: puts the compositor into idle mode (frames and `frame_done` once a second) at once instead of after the 10 s auto-idle timeout. Failure is not an error: auto-idle covers it. |
 | `stop_desktop`, `stop_deck` | The two kill lists, each written once. |
 | `start_desktop <w> <h>` | KWin, activation environment, kded6, plasmashell, polkit. |
 
@@ -134,9 +135,9 @@ Stale sockets: replace the hard-coded `rm -f /tmp/.X0-lock ... X2` with a loop o
 | Script | Becomes |
 |---|---|
 | `sunshine-prep-desktop.sh` | `stop_deck`, `set_output_mode`, `start_desktop` |
-| `sunshine-undo-desktop.sh` | `stop_desktop` (Plasma, Steam, KWin with its 5 s grace period, Xwayland), as in the current working-tree version |
+| `sunshine-undo-desktop.sh` | `stop_desktop` (Plasma, Steam, KWin with its 5 s grace period, Xwayland), as in the current working-tree version, then `set_idle true` |
 | `sunshine-prep-gamescope.sh` | binary checks, `stop_desktop`, `stop_deck`, `set_output_mode`, MangoHud config, gamescope launch |
-| `sunshine-undo-gamescope.sh` | `stop_deck` |
+| `sunshine-undo-gamescope.sh` | `stop_deck`, then `set_idle true` |
 
 Prep and undo scripts use `set -u` but not `set -e`. A failed `pkill` must not abort a prep command, because Sunshine cancels the launch when a prep command returns non-zero. Real failures (`set_output_mode`, missing binary, gamescope exits at once) return a non-zero code explicitly.
 
@@ -260,7 +261,8 @@ Run in a test container after each phase.
 | Rename the compositor binary, start the unit | unit shows a failed start, not success |
 | `kill` the compositor | stack restarts; the previous log directory is still there |
 | `kill` Sunshine | stack restarts |
-| Moonlight: Desktop, then Stop | KWin, Plasma and Xwayland gone; compositor, PipeWire and Sunshine still running |
+| Moonlight: Desktop, then Stop | KWin, Plasma and Xwayland gone; compositor, PipeWire and Sunshine still running; compositor log shows `[idle] ON (D-Bus SetIdle)` |
+| Moonlight: connect after Stop | compositor log shows `[idle] OFF (SetOutputMode)` before KWin starts |
 | Moonlight: Desktop again | desktop comes up at the client resolution; prep time logged |
 | Moonlight: Steam Deck Mode, Stop, then Desktop | each switch works; no leftover `gamescope`, `steam` or `Xwayland` |
 | Manual `run.sh`, then Ctrl+C | `pgrep -u "$UID" -a` shows none of the stack's processes |
@@ -270,7 +272,7 @@ Run in a test container after each phase.
 
 1. Is `run-steam.sh` (standalone Steam without gamescope) still used? If not, delete it instead of porting it to `run.sh --steam`.
 2. Keep `--no-log` after phase 3, or is cheap logging enough?
-3. Should the unit keep `UnsetEnvironment=DBUS_SESSION_BUS_ADDRESS` and a private `dbus-launch` bus? The prep scripts fall back to the systemd user bus at `/run/user/<uid>/bus`, which is a different bus from the one the compositor registers on. Either remove the fallback or move the stack to the user bus.
+3. Should the unit keep `UnsetEnvironment=DBUS_SESSION_BUS_ADDRESS` and a private `dbus-launch` bus? The prep scripts fall back to the systemd user bus at `/run/user/<uid>/bus`, which is a different bus from the one the compositor registers on. Either remove the fallback or move the stack to the user bus. The same fallback is used by the `SetIdle` call in the undo scripts; there a wrong bus only delays idle by 10 s.
 4. Stale files in upgraded containers (phase 5, item 4): clean up or leave?
 
 ## Later: systemd units per component
