@@ -24,4 +24,9 @@ rm -f /tmp/.X0-lock /tmp/.X1-lock 2>/dev/null || true
 # 5. focus-daemon если был
 pkill -u "$UID_SELF" -x gamescope-focus-daemon 2>/dev/null || true
 
+# ── Idle: CDH сразу перестаёт гнать кадры (иначе авто-idle через 10 с) ──
+DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$UID_SELF/bus}" \
+    busctl --user call org.gamescope.Input /org/gamescope/Input \
+    org.gamescope.InputDeviceManager SetIdle b true >/dev/null 2>&1 || true
+
 echo "[undo-gamescope] $(date) Gamescope+Steam fully cleaned" >> /tmp/prep-gamescope.log

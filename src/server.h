@@ -29,6 +29,10 @@ extern "C" {
 #define CD_DEFAULT_HEIGHT  1080
 #define CD_DEFAULT_REFRESH 60000   /* mHz — стартовое значение, меняется через SetOutputMode */
 
+#define CD_HEARTBEAT_ACTIVE_MS   500   /* heartbeat во время стрима */
+#define CD_HEARTBEAT_IDLE_MS    1000   /* heartbeat в idle: единственный источник frame_done */
+#define CD_IDLE_TIMEOUT_DEFAULT   10   /* сек без screencopy → idle (0 = авто-idle выключен) */
+
 struct cd_server {
     /* ── Core ── */
     struct wl_display          *display;
@@ -57,6 +61,16 @@ struct cd_server {
     int                         cur_width;
     int                         cur_height;
     int                         cur_refresh;    /* mHz */
+
+    /* ── Idle mode ──
+     * Нет захвата (Sunshine не стримит) → рендер и frame_done только по
+     * heartbeat (1 Гц). KWin/Gamescope и их клиенты троттлятся следом.
+     * Вход: idle_timeout_sec без screencopy или D-Bus SetIdle(true).
+     * Выход: запрос screencopy, SetOutputMode или SetIdle(false). */
+    struct wl_listener          client_created;   /* следим за zwlr_screencopy_frame_v1 */
+    bool                        idle;
+    int                         idle_timeout_sec;
+    struct timespec             last_capture_time;
 
     /* ── XDG Shell ── */
     struct wlr_xdg_shell      *xdg_shell;
@@ -129,6 +143,12 @@ void cd_register_protocols(struct cd_server *server);
 
 /* output.cpp */
 void cd_setup_output(struct cd_server *server);
+
+/* idle.cpp */
+void cd_idle_setup(struct cd_server *server);   /* до wl_display_add_socket */
+void cd_idle_tick(struct cd_server *server);    /* из heartbeat: авто-вход по таймауту */
+void cd_idle_enter(struct cd_server *server, const char *reason);
+void cd_idle_exit(struct cd_server *server, const char *reason);
 
 /* xdg.cpp */
 void cd_setup_xdg_handlers(struct cd_server *server);

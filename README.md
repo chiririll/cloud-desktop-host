@@ -112,6 +112,7 @@ cloud-desktop-host/
 │   ├── server.h                 # центральная структура cd_server
 │   ├── protocols.cpp            # 20 Wayland-протоколов + PID-фильтр
 │   ├── output.cpp               # рендер-цикл, damage-driven, present fixup
+│   ├── idle.cpp                 # idle mode: троттлинг до 1 FPS без стрима
 │   ├── xdg.cpp                  # XDG Shell lifecycle, auto pointer lock
 │   ├── input.cpp                # standalone libinput, FREE/LOCKED режимы
 │   ├── dbus_input.cpp           # D-Bus org.gamescope.Input (730 строк)

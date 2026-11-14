@@ -19,15 +19,20 @@ extern "C" {
 
 static int hud_timer_cb(void *data) {
     auto server = (cd_server*)data;
-    
-    // Безусловный хартбит в 1 FPS для избежания таймаутов
-    // (Sunshine падает по starvation, KWin замерзает наглухо без frame_done)
+
+    /* Авто-idle: давно не было screencopy → троттлим */
+    cd_idle_tick(server);
+
+    // Безусловный хартбит (500 мс, в idle — 1 с) для избежания таймаутов
+    // (Sunshine падает по starvation, KWin замерзает наглухо без frame_done).
+    // В idle это единственный источник кадров и frame_done.
     server->needs_render = true;
     if (server->output) {
         wlr_output_schedule_frame(server->output);
     }
-    
-    wl_event_source_timer_update(server->hud_timer, 500);
+
+    wl_event_source_timer_update(server->hud_timer,
+        server->idle ? CD_HEARTBEAT_IDLE_MS : CD_HEARTBEAT_ACTIVE_MS);
     return 0;
 }
 
@@ -39,12 +44,15 @@ int main(int argc, char *argv[]) {
     server.debug        = false;
     server.hud          = false;
     server.no_auto_lock = false;
+    server.idle_timeout_sec = CD_IDLE_TIMEOUT_DEFAULT;
 
     /* Парсинг аргументов:
      *   --debug / -d       → verbose WLR_DEBUG logging
      *   --hud  / hud       → HUD overlay поверх стрима
      *   --no-auto-lock     → не отправлять авто-RCTRL при маппинге клиента
-     *                        (для Steam режима: RCTRL не нужен, может мешать) */
+     *                        (для Steam режима: RCTRL не нужен, может мешать)
+     *   --idle-timeout=SEC → через SEC секунд без screencopy включить idle
+     *                        (frame_done раз в секунду). 0 = выкл, по умолчанию 10 */
     for (int i = 1; i < argc; i++) {
         std::string arg(argv[i]);
         if (arg == "--debug" || arg == "-d") {
@@ -53,6 +61,9 @@ int main(int argc, char *argv[]) {
             server.hud = true;
         } else if (arg == "--no-auto-lock") {
             server.no_auto_lock = true;
+        } else if (arg.rfind("--idle-timeout=", 0) == 0) {
+            server.idle_timeout_sec = std::atoi(arg.c_str() + 15);
+            if (server.idle_timeout_sec < 0) server.idle_timeout_sec = 0;
         }
     }
 
@@ -99,6 +110,9 @@ int main(int argc, char *argv[]) {
     cd_setup_output(&server);
     if (!server.output) return 1;
 
+    /* 8.5 Idle-детектор (до сокета: клиенты должны попадать под наблюдение) */
+    cd_idle_setup(&server);
+
     /* 9. Сокет */
     if (wl_display_add_socket(server.display, "wayland-cd") != 0) {
         wlr_log(WLR_ERROR, "Failed to create wayland-cd socket");
@@ -117,7 +131,12 @@ int main(int argc, char *argv[]) {
 
     /* HUD Timer: Принудительное обновление интерфейса раз в секунду */
     server.hud_timer = wl_event_loop_add_timer(wl_display_get_event_loop(server.display), hud_timer_cb, &server);
-    wl_event_source_timer_update(server.hud_timer, 500);
+    wl_event_source_timer_update(server.hud_timer, CD_HEARTBEAT_ACTIVE_MS);
+    if (server.idle_timeout_sec > 0)
+        wlr_log(WLR_INFO, "[idle] Auto-idle after %d s without screencopy",
+                server.idle_timeout_sec);
+    else
+        wlr_log(WLR_INFO, "[idle] Auto-idle disabled (D-Bus SetIdle still works)");
 
     wl_display_run(server.display);
 

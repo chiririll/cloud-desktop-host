@@ -62,9 +62,12 @@ static void handle_desktop_commit(struct wl_listener *listener, void *data) {
     server->hud_kwin_commits++;
     server->hud_watchdog_commits++;
 
-    /* KWin прислал новый буфер — перерисовываем немедленно */
+    /* KWin прислал новый буфер — перерисовываем немедленно.
+     * В idle только помечаем: кадр (и frame_done) выдаст heartbeat,
+     * что и троттлит KWin/Gamescope вместе с их клиентами. */
     server->needs_render = true;
-    wlr_output_schedule_frame(server->output);
+    if (!server->idle)
+        wlr_output_schedule_frame(server->output);
 }
 
 /*

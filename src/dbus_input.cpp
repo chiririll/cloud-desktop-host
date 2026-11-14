@@ -530,6 +530,8 @@ static int method_set_output_mode(
         (int)refresh_mhz == server->cur_refresh) {
         wlr_log(WLR_INFO, "[SetOutputMode] Mode unchanged %ux%u@%uHz",
                 width, height, fps);
+        /* Prep-скрипт = начинается стрим: выходим из idle в любом случае */
+        cd_idle_exit(server, "SetOutputMode");
         return sd_bus_reply_method_return(msg, "b", 1);
     }
 
@@ -570,10 +572,49 @@ static int method_set_output_mode(
     if (server->output)
         wlr_output_schedule_frame(server->output);
 
+    cd_idle_exit(server, "SetOutputMode");
+
     wlr_log(WLR_INFO, "[SetOutputMode] Done. target=%dHz",
             refresh_mhz / 1000);
 
     return sd_bus_reply_method_return(msg, "b", 1);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   D-Bus method: SetIdle(idle)
+   true  — сразу в idle (undo-скрипты после «Stop» в Moonlight).
+   false — выйти из idle; если захвата так и не будет, авто-idle
+           вернёт его через idle_timeout_sec.
+   ════════════════════════════════════════════════════════════════ */
+
+static int method_set_idle(
+    sd_bus_message *msg, void *userdata, sd_bus_error *error)
+{
+    auto *dbus = static_cast<struct cd_dbus_input*>(userdata);
+    struct cd_server *server = dbus->server;
+    if (!server)
+        return sd_bus_error_setf(error, SD_BUS_ERROR_FAILED,
+                                  "Server not initialized");
+
+    int idle = 0;
+    int r = sd_bus_message_read(msg, "b", &idle);
+    if (r < 0) return r;
+
+    if (idle) cd_idle_enter(server, "D-Bus SetIdle");
+    else      cd_idle_exit(server, "D-Bus SetIdle");
+
+    return sd_bus_reply_method_return(msg, "b", server->idle ? 1 : 0);
+}
+
+static int manager_property_get_idle(
+    sd_bus *bus, const char *path, const char *interface,
+    const char *property, sd_bus_message *reply,
+    void *userdata, sd_bus_error *error)
+{
+    (void)bus; (void)path; (void)interface; (void)property; (void)error;
+    auto *dbus = static_cast<struct cd_dbus_input*>(userdata);
+    int idle = dbus->server && dbus->server->idle;
+    return sd_bus_message_append(reply, "b", idle);
 }
 
 /* ── Manager vtable ── */
@@ -586,6 +627,9 @@ static const sd_bus_vtable s_manager_vtable[] = {
     SD_BUS_SIGNAL("deviceRemoved", "s", 0),
     SD_BUS_METHOD("SetOutputMode", "uuu", "b", method_set_output_mode,
                    SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("SetIdle", "b", "b", method_set_idle,
+                   SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_PROPERTY("Idle", "b", manager_property_get_idle, 0, 0),
     SD_BUS_VTABLE_END,
 };
 
