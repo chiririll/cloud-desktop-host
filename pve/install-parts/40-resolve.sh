@@ -1,4 +1,4 @@
-# ── interactive/env resolution: which CT, which Fedora, which options ──
+# ── interactive/env resolution: which CT, which distro, which options ──
 resolve_ctid() {
   if [[ -z $CTID ]]; then
     have_tty || die "no terminal to ask on: set CTID=<id> (and optionally CT_* settings)"
@@ -86,33 +86,32 @@ resolve_ct_network() {
   [[ $CT_GATEWAY =~ ^$IPV4_RE$ ]] || die "static CT_IP needs CT_GATEWAY=a.b.c.d, got '${CT_GATEWAY:-}'"
 }
 
-resolve_fedora() {
-  local ct_fedora
-  if [[ -n $CT_NAME ]] && ct_up; then   # existing running CT: its release decides
-    ct_fedora=$(ct sh -c '. /etc/os-release && [ "$ID" = fedora ] && echo "$VERSION_ID"' 2>/dev/null || true)
-    if [[ -n $ct_fedora ]]; then
-      [[ -z $FEDORA || $FEDORA == "$ct_fedora" ]] || die "CT $CTID runs Fedora $ct_fedora but Fedora $FEDORA was requested (upgrade or recreate the CT first)"
-      FEDORA=$ct_fedora
+# DISTRO = fedora-NN | ubuntu-NN.NN. An existing running CT decides for itself.
+resolve_distro() {
+  local ct_distro
+  if [[ -n $CT_NAME ]] && ct_up; then
+    ct_distro=$(ct sh -c '. /etc/os-release && echo "$ID-$VERSION_ID"' 2>/dev/null || true)
+    if [[ -n $ct_distro ]]; then
+      [[ -z $DISTRO || $DISTRO == "$ct_distro" ]] || die "CT $CTID runs $ct_distro but $DISTRO was requested (upgrade or recreate the CT first)"
+      DISTRO=$ct_distro
     fi
   fi
-  if [[ -z $FEDORA ]]; then
+  if [[ -z $DISTRO ]]; then
     if [[ -z $CT_NAME ]] && ((!CHECK_ONLY)); then
-      ask FEDORA "Fedora release (${SUPPORTED_FEDORA[*]})" "$DEFAULT_FEDORA" '^[0-9]+$'
+      ask DISTRO "Distro (${SUPPORTED_DISTROS[*]})" "$DEFAULT_DISTRO" '^[a-z]+-[0-9.]+$'
     else
-      FEDORA=$DEFAULT_FEDORA
+      DISTRO=$DEFAULT_DISTRO
     fi
   fi
-  is_supported_fedora "$FEDORA" || die "Fedora '$FEDORA' has no release bundle; supported: ${SUPPORTED_FEDORA[*]}"
+  is_supported_distro "$DISTRO" || die "'$DISTRO' has no release bundle; supported: ${SUPPORTED_DISTROS[*]}"
+  OS_TYPE=${DISTRO%%-*}
 }
 
-# depends on FEDORA
 resolve_options() {
-  if [[ -z $CLOUD_MOUSE_RPM ]]; then
-    CLOUD_MOUSE_DEFAULT=1
-    CLOUD_MOUSE_RPM=https://github.com/chiririll/kcm-cloud-mouse/releases/latest/download/kcm-cloud-mouse-fc$FEDORA-x86_64.rpm
-  fi
   if [[ -z $INSTALL_STEAM ]]; then
     confirm "Install Steam + Gamescope + MangoHud?" y && INSTALL_STEAM=1 || INSTALL_STEAM=0
   fi
   [[ $INSTALL_STEAM =~ ^[01]$ ]] || die "INSTALL_STEAM must be 1 or 0, got '$INSTALL_STEAM'"
+  [[ $INSTALL_UPDATE_TIMER =~ ^[01]$ ]] || die "INSTALL_UPDATE_TIMER must be 1 or 0, got '$INSTALL_UPDATE_TIMER'"
+  ((!FORCE_RESTART || UPDATE)) || die "--force-restart only makes sense with --update"
 }

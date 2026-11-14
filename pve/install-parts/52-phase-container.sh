@@ -1,17 +1,19 @@
 # ── phase: the LXC container itself (config, devices, restart) ──
-template() { pveam list "$TEMPLATE_STORAGE" 2>/dev/null | awk -v p="fedora-$FEDORA-default" '$1 ~ p {print $1}' | sort | tail -1; }
+# pveam template name pattern: fedora-44-default, ubuntu-26.04-standard
+template_pattern() { case $DISTRO in fedora-*) echo "$DISTRO-default" ;; *) echo "$DISTRO-standard" ;; esac; }
+template() { pveam list "$TEMPLATE_STORAGE" 2>/dev/null | awk -v p="$(template_pattern)" '$1 ~ p {print $1}' | sort | tail -1; }
 chk_template() { pct status "$CTID" >/dev/null 2>&1 || [[ -n "$(template)" ]]; }
 do_template() {
   pveam update
-  local t; t=$(pveam available --section system | awk -v p="fedora-$FEDORA-default" '$2 ~ p {print $2}' | sort | tail -1)
-  [[ -n $t ]] || { echo "no fedora-$FEDORA template in pveam"; return 1; }
+  local t; t=$(pveam available --section system | awk -v p="$(template_pattern)" '$2 ~ p {print $2}' | sort | tail -1)
+  [[ -n $t ]] || { echo "no $(template_pattern) template in pveam"; return 1; }
   pveam download "$TEMPLATE_STORAGE" "$t"
 }
 
 chk_ct() { pct status "$CTID" >/dev/null 2>&1; }
 do_ct() {
   pct create "$CTID" "$(template)" \
-    --unprivileged 1 --features nesting=1,fuse=1 --ostype fedora \
+    --unprivileged 1 --features nesting=1,fuse=1 --ostype "$OS_TYPE" \
     --hostname "$CT_HOSTNAME" --cores "$CT_CORES" --memory "$CT_MEMORY" --swap 1024 \
     --rootfs "$CT_STORAGE:$CT_DISK" --net0 "name=eth0,bridge=$CT_BRIDGE,ip=$CT_IP${CT_GATEWAY:+,gw=$CT_GATEWAY}"
 }
@@ -83,8 +85,10 @@ chk_user() {
   done
 }
 do_user() {
-  ct_sh "id $CT_USER >/dev/null 2>&1 || useradd -m $CT_USER"
-  ct usermod -aG video,render,input,wheel "$CT_USER"
+  # ct-install.sh makes sure of the user as well (standalone use); here it exists early so its uid is known
+  # for the input guard below. The sudo group exists on Ubuntu, wheel on Fedora.
+  ct_sh "id $CT_USER >/dev/null 2>&1 || useradd -m -s /bin/bash $CT_USER"
+  ct_sh "for g in video render input wheel sudo; do getent group \$g >/dev/null && usermod -aG \$g $CT_USER; done"
 }
 
 # GPU/uinput passthrough entries (devN) wanted in the CT config, one per line
@@ -127,7 +131,7 @@ skip_rest() {
 
 phase_container() {
   header "Container $CTID${CT_NAME:+ ($CT_NAME)}"
-  step "Fedora $FEDORA template" chk_template do_template
+  step "$DISTRO template" chk_template do_template
   step "CT exists" chk_ct do_ct
   if ((CHECK_ONLY)) && ! chk_ct; then skip_rest "CT $CTID does not exist yet"; return 0; fi
   require "CT is unprivileged (default idmap)" chk_unpriv \
@@ -142,7 +146,7 @@ phase_container() {
   restart_if_applied
   if ((CHECK_ONLY)) && ! ct_up; then skip_rest "CT $CTID is not running"; return 0; fi
 
-  step "CT user '$CT_USER' (video,render,input,wheel)" chk_user do_user
+  step "CT user '$CT_USER' (video,render,input,wheel/sudo)" chk_user do_user
   if input_isolated; then step "input devices of CT $CTID owned by '$CT_USER'" chk_input_owner do_input_owner; fi
   step "GPU/uinput passthrough ($(drm_node card 2>/dev/null), $(drm_node renderD 2>/dev/null))" chk_devs do_devs
   restart_if_applied

@@ -10,15 +10,14 @@ main() {
 
   resolve_ctid
   resolve_ct
-  resolve_fedora
+  resolve_distro
   resolve_options
 
   phase_host
   phase_guard
   phase_container
   if ((!SKIPPED)); then   # --check with a missing/stopped CT: nothing to look at inside
-    phase_inside
-    phase_services
+    phase_run_inside
   fi
   phase_summary
 }

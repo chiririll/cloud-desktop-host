@@ -1,6 +1,8 @@
 # Proxmox installer: `pve/install.sh`
 
-One script, run on the Proxmox host, that sets up CDH + KWin/Plasma + Sunshine (+ Steam/Gamescope) in an **unprivileged** LXC container that shares the NVIDIA GPU.
+A script run on the Proxmox host that sets up CDH + KWin/Plasma + Sunshine (+ Steam/Gamescope) in an **unprivileged** LXC container (Fedora or Ubuntu) that shares the NVIDIA GPU.
+
+It is the **host half**: driver checks, modules, input guard, the LXC and its config. Everything inside the container is `pve/ct-install.sh`, which `install.sh` pushes into the CT and runs there. That script also works on its own in any container or VM: see [CT_INSTALLER.md](CT_INSTALLER.md).
 
 It is **idempotent**. Each step:
 
@@ -8,7 +10,7 @@ It is **idempotent**. Each step:
 2. **applies** the change only if it is not,
 3. **checks again**, and stops with an error if the step still is not satisfied.
 
-Running it again is always safe. Re-run it after a host NVIDIA driver update, after `/dev/dri/cardN` got renumbered, or after a Sunshine upgrade restored its file capabilities. Each time it fixes only what drifted.
+Running it again is always safe. To bring everything to the latest version use `--update` ([CT_INSTALLER.md](CT_INSTALLER.md#update-mode)); `--check --update` shows what would change. Re-run it after a host NVIDIA driver update, after `/dev/dri/cardN` got renumbered, or after a Sunshine upgrade restored its file capabilities. Each time it fixes only what drifted.
 
 ---
 
@@ -73,9 +75,11 @@ At the end the script prints the CT's IP, how to start the stack, and the Sunshi
 
 | Situation | Source |
 |---|---|
-| Run via `curl`, or from a checkout without `dist/` | latest GitHub release `cdh-fc$FEDORA-x86_64.tar.gz`, verified against `SHA256SUMS` |
+| Run via `curl`, or from a checkout without `dist/` | latest GitHub release `cdh-<tag>-x86_64.tar.gz` (tag `fc43`, `ubuntu2604`…), downloaded **inside the CT** by `ct-install.sh` and verified against `SHA256SUMS` |
 | `CDH_VERSION=v1.0.0` | that release |
-| Run from a checkout that has `dist/cloud-desktop-host` | the local build plus the checkout's `scripts/` and `configs/` |
+| Run from a checkout that has `dist/cloud-desktop-host` | the local build plus the checkout's `scripts/` and `configs/`, pushed into the CT (`CDH_LOCAL_BUNDLE`). Build it for the CT's distro |
+
+`ct-install.sh` itself comes from the checkout, else from the release (verified against `SHA256SUMS`).
 
 How releases are built: [RELEASE_BUILD.md](RELEASE_BUILD.md).
 
@@ -102,15 +106,18 @@ CTID=181 YES=1 bash -c "$(curl -fsSL …/pve/install.sh)"     # no questions at 
 | `CT_BRIDGE` | asked, `vmbr0` | `net0` bridge (creation only) |
 | `CT_IP` | asked, `dhcp` | `dhcp`, or a static address in CIDR form, e.g. `192.168.1.50/24` (creation only) |
 | `CT_GATEWAY` | asked, host default route | gateway for a static `CT_IP` (creation only) |
-| `TEMPLATE_STORAGE` | `local` | where the Fedora template is downloaded |
-| `FEDORA` / `--fedora N` | asked for a new CT (default `43`); detected for a running existing CT | `43`, `44` or `45`: template version and release bundle |
+| `TEMPLATE_STORAGE` | `local` | where the template is downloaded |
+| `DISTRO` / `--distro` | asked for a new CT (default `fedora-43`); detected for a running existing CT | `fedora-43`, `fedora-44`, `fedora-45` or `ubuntu-26.04`: template and release bundle. `FEDORA=44` / `--fedora 44` still work |
 | `CT_USER` | `user` | desktop user inside the CT |
-| `INSTALL_STEAM` | `1` | `0` skips RPM Fusion, Steam, Gamescope and MangoHud |
+| `INSTALL_STEAM` | `1` | `0` skips RPM Fusion / multiverse, Steam, Gamescope and MangoHud |
 | `SHM_SIZE` | `4G` | size of the CT's `/dev/shm` tmpfs |
 | `NVIDIA_PCI` | first NVIDIA GPU | e.g. `0000:01:00.0`, when the host has several NVIDIA cards |
 | `CDH_VERSION` | local `dist/`, else `latest` | release tag to install |
 | `CDH_GH_REPO` | `chiririll/cloud-desktop-host` | where releases come from |
-| `SUNSHINE_RPM` | LizardByte latest `sunshine-fedora-$FEDORA-amd64.rpm` | URL or a local `.rpm` path |
+| `SUNSHINE_PKG` | LizardByte's latest asset for the distro (`.rpm` / `.deb`) | URL or a local file (pushed into the CT). `SUNSHINE_RPM` is the old name |
+| `SUNSHINE_VERSION` | latest | pin a Sunshine release tag |
+| `CLOUD_MOUSE_PKG` | latest kcm-cloud-mouse release for the distro, skipped with a warning if there is none | URL, local file or `none`. `CLOUD_MOUSE_RPM` is the old name |
+| `INSTALL_UPDATE_TIMER` | `0` | `1`: weekly `--update` timer inside the CT |
 | `CSRF_EXTRA` | empty | extra Sunshine web UI origins, e.g. `https://gaming.example.org` |
 | `INSTALL_INPUT_GUARD` | `1` | `0` skips the `cdh_input_guard` host kernel module. The CT then shares the host's `/dev/input` with every other such CT |
 | `CDH_GUARD_REPO` | `chiririll/cdh-input-guard` | where the module release comes from |
@@ -208,12 +215,20 @@ Passthrough entries come from sysfs, not hard-coded names. That matters on hosts
 /dev/uinput                                     gid=<input in CT>
 ```
 
-The gids are looked up inside the CT (`getent group`), so they match Fedora's dynamic `render`/`input` groups.
+The gids are looked up inside the CT (`getent group`), so they match the distro's dynamic `render`/`input` groups.
 
 ### Inside the container
 
-| Step | Check | Apply |
-|---|---|---|
+All of it is done by `ct-install.sh`; the steps and their checks are listed in [CT_INSTALLER.md](CT_INSTALLER.md#steps). The host script only:
+
+1. pushes `ct-install.sh` (and, for a local build, the binary + `scripts/` + `configs/`, and local `SUNSHINE_PKG` / `CLOUD_MOUSE_PKG` files) into `/tmp/cdh-ct`,
+2. runs it with the settings as environment variables (`CT_USER`, `INSTALL_STEAM`, `CDH_INPUT_ISOLATED`, …),
+3. reads the exit code: `10` (`--check`: steps needed, added to the host's count), `11` (restart the CT), `12` (session restarted, informational), anything else other than `0` stops,
+4. removes the pushed files.
+
+The host still creates `CT_USER` in the CT (early, so the input guard knows its uid); `ct-install.sh` makes sure of it again for standalone use.
+
+---|---|---|
 | Host udev db | fstab has the `/mnt/host-udev → /run/udev` bind, and `/run/udev/data` is non-empty | add the fstab line, mount it |
 | Host udev rule | without the input guard: `/etc/udev/rules.d/60-lxc-virtual-input.rules` on the **host** gives virtual input devices to the CT user's host uid (`100000 + uid`). With it: the rule is absent, unless another CT still mounts the host's `/dev/input` | write the rule, or remove it; `udevadm control --reload` |
 | Packages | `rpm -q` on KWin, Plasma, PipeWire, Xwayland, D-Bus, grim, xprop… | `dnf install` |
@@ -271,6 +286,7 @@ Existing config you wrote yourself (another file name, the kernel command line) 
 | Host NVIDIA driver updated | CT userspace reinstalled at the new version |
 | GPU nodes renumbered after a reboot (`card0` ↔ `card1`) | stale `devN` replaced, CT restarted |
 | Sunshine or Gamescope upgraded in the CT | file caps removed again |
+| Anything newer is available | `--update` |
 | New CDH release | binary and scripts updated (`CDH_VERSION=…` to pin one) |
 | Host kernel updated | `cdh_input_guard` installed for the new kernel and loaded. Until then the containers get no input devices |
 | Another CT added on the same host | run it for every CT, so each gets its own `/dev/input` |
@@ -290,7 +306,8 @@ All command output goes to `/var/log/cdh-lxc-install.log` on the host, with a `=
 | `no terminal to ask on: set CTID=<id>` | run without a TTY; pass `CTID=…` |
 | `aborted` | you answered no to a confirmation |
 | `<step>: still not satisfied after applying` | the command ran but the check still fails. Example: the passthrough step after `pct` stored options in a different form. Compare with `pct config $CTID \| grep ^dev` |
-| `could not download/verify cdh-fc43-x86_64.tar.gz` | no release yet, wrong `CDH_VERSION`/`FEDORA`, or a checksum mismatch |
+| `could not download/verify cdh-<tag>-x86_64.tar.gz` | no release yet, no build for this distro, wrong `CDH_VERSION`, or a checksum mismatch |
+| `ct-install.sh failed inside CT … (exit N)` | see its output above and `/var/log/cdh-ct-install.log` in the CT |
 | `nvidia-drm modeset=Y: set nvidia-drm modeset=1 … and reboot` | expected on a fresh host: run `host-persist.sh`, reboot, re-run |
 | `! uinput/nvidia-uvm not set up at boot` | only a warning; after a host reboot, load them before starting the CT or run `host-persist.sh` |
 | `CT is privileged or uses a custom lxc.idmap` | the script refuses rather than guess uid mappings |
@@ -305,20 +322,26 @@ For the background on each step (why the bind goes through `/mnt/host-udev`, why
 
 ## Development
 
-`pve/install.sh` is **generated**: it has to stay one self-contained file because it is run as `bash -c "$(curl …)"`. The source lives in `pve/install-parts/*.sh`, concatenated in name order by `pve/build.sh`.
+`pve/install.sh` and `pve/ct-install.sh` are **generated**: each has to stay one self-contained file because they are run as `bash -c "$(curl …)"`. The source lives in `pve/install-parts/`, concatenated by `pve/build.sh`: top-level parts + `shared/` make `install.sh`, `ct/` parts + `shared/` make `ct-install.sh`.
 
-| Part | Contents |
-|---|---|
-| `00-header` | usage comment, `set -euo pipefail` |
-| `10-config` | settings, defaults, runtime globals, `parse_args` |
-| `20-ui` | output helpers, `ask`/`confirm` |
-| `30-step` | the `step` / `require` engine |
-| `40-ct` | `ct*` helpers, `ct_install_rpm`, `chk_nocaps`, GPU discovery |
-| `50-release` | release bundle download/verify, `phase_bundle` |
-| `60-resolve` | which CT, which Fedora, options |
-| `70`–`73-phase-*` | one `phase_*` function per stage: host, container, inside the CT, user service |
-| `90-main` | `main`: the order of the phases |
+| Part | Goes into | Contents |
+|---|---|---|
+| `00-header`, `10-config` | `install.sh` | usage comment, settings, runtime globals, `parse_args` |
+| `shared/20-engine` | both | output helpers, the `step` / `require` engine, `render_file` |
+| `shared/30-release` | both | release URL, manifest, bundle download/verify |
+| `20-helpers` | `install.sh` | `ask`/`confirm`, `ct*`, GPU discovery |
+| `40-resolve` | `install.sh` | which CT, which distro, options |
+| `50`–`52-phase-*` | `install.sh` | host, input guard, the container itself |
+| `55-phase-run-inside` | `install.sh` | push + run `ct-install.sh`, summary |
+| `60-main` | `install.sh` | `main`: the order of the phases |
+| `ct/00-header`, `ct/10-ct-config` | `ct-install.sh` | usage comment + contract, settings, `parse_args` |
+| `ct/20-distro`, `ct/distro/*`, `ct/25-ct-helpers` | `ct-install.sh` | dnf/apt backend, helpers |
+| `ct/30`–`50-phase-*` | `ct-install.sh` | system, CDH/Sunshine/Steam, user service |
+| `ct/60-phase-update` | `ct-install.sh` | update-only steps |
+| `ct/90-ct-main` | `ct-install.sh` | `main` |
 
-To add a step, write its `chk_*` / `do_*` functions in the matching phase part and call `step` from that phase's `phase_*` function. For a new stage, add `NN-phase-<name>.sh` and one line in `90-main.sh`.
+`files/*` (udev rules, systemd units, helper script) are inlined by `build.sh`; the lists of what goes into which script are at the top of `build.sh`.
 
-After editing a part, run `pve/build.sh` and commit `install.sh` together with it. `pve/build.sh --check` (run in CI) fails if they are out of sync.
+To add a step, write its `chk_*` / `do_*` functions in the matching phase part and call `step` from that phase's `phase_*` function. For a new stage, add `NN-phase-<name>.sh` (in `ct/` for the container) and one line in `main`.
+
+After editing a part, run `pve/build.sh` and commit `install.sh` and `ct-install.sh` together with it. `pve/build.sh --check` (run in CI) fails if they are out of sync.

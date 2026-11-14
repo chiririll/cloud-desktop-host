@@ -1,0 +1,12 @@
+[Unit]
+Description=cloud-desktop-host update (ct-install.sh --update)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/cdh/ct-install.env
+# Fetches the installer of the configured release and runs it; a failed download runs nothing.
+# 12 = the session was restarted.
+ExecStart=/bin/bash -c 's=$$(curl -fsSL @RELEASE_BASE@/ct-install.sh) && exec bash -c "$$s" ct-install --update'
+SuccessExitStatus=12

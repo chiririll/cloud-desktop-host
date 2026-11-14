@@ -498,7 +498,7 @@ busctl --user call \
 
 CDH публикует интерфейс **`org.gamescope.Input`** (совместим с **KCM Cloud Mouse**).
 
-Страница «Мышь» в KDE не видит устройства CDH (KWin вложенный). GUI — **System Settings → Input Devices → Cloud Mouse**: `pve/install.sh` ставит RPM из релизов [kcm-cloud-mouse](https://github.com/chiririll/kcm-cloud-mouse) (`CLOUD_MOUSE_RPM=none` — пропустить).
+Страница «Мышь» в KDE не видит устройства CDH (KWin вложенный). GUI — **System Settings → Input Devices → Cloud Mouse**: `pve/install.sh` ставит пакет (RPM, на Ubuntu — deb) из релизов [kcm-cloud-mouse](https://github.com/chiririll/kcm-cloud-mouse) (`CLOUD_MOUSE_PKG=none` — пропустить).
 
 #### Настройки через D-Bus вручную
 

@@ -36,6 +36,24 @@ _SELF=${0##*/}
 log() { echo "[$_SELF] $*"; }
 die() { log "ERROR: $*" >&2; exit 1; }
 
+# find_libexec <name>: prints the path of a helper that distros put in different libexec dirs
+# (Fedora /usr/libexec[/kf6], Debian/Ubuntu /usr/lib/<multiarch>/libexec[/kf6]). Warns and fails if none exists.
+find_libexec() {
+    local d
+    for d in /usr/libexec /usr/libexec/kf6 \
+             /usr/lib/x86_64-linux-gnu/libexec /usr/lib/x86_64-linux-gnu/libexec/kf6 \
+             /usr/lib64/libexec /usr/lib64/libexec/kf6 /usr/lib/libexec /usr/lib/libexec/kf6; do
+        if [ -x "$d/$1" ]; then echo "$d/$1"; return 0; fi
+    done
+    log "WARNING: $1 not found in any known libexec directory" >&2
+    return 1
+}
+
+# A Moonlight client is streaming: set by the sunshine-prep-* scripts, cleared by the undo scripts
+# (and at session start). The installer's --update looks at it before restarting the session.
+stream_active_set()   { touch "$CDH_STATE_DIR/stream-active"; }
+stream_active_clear() { rm -f "$CDH_STATE_DIR/stream-active"; }
+
 # Fork-free timestamp filter: "[HH:MM:SS.mmm] line"
 add_ts() {
     local line us
@@ -214,5 +232,8 @@ start_desktop() {
     wait_for 5 busctl --user status org.kde.kded6 || log "kded6 not on D-Bus yet"
     spawn plasmashell env "${KDE_ENV[@]}" DISPLAY="$KWIN_XDISPLAY" plasmashell --replace
     wait_for 15 busctl --user status org.kde.plasmashell || log "plasmashell not on D-Bus yet"
-    spawn polkit env "${KDE_ENV[@]}" DISPLAY="$KWIN_XDISPLAY" /usr/libexec/kf6/polkit-kde-authentication-agent-1
+    local polkit_bin
+    if polkit_bin=$(find_libexec polkit-kde-authentication-agent-1); then
+        spawn polkit env "${KDE_ENV[@]}" DISPLAY="$KWIN_XDISPLAY" "$polkit_bin"
+    fi
 }

@@ -24,7 +24,6 @@ chk_reboot() {
 phase_host() {
   local out
   header "Host"
-  phase_bundle
 
   require "NVIDIA driver loaded ($(host_driver || echo none))" chk_driver \
     "install the NVIDIA driver on the host first (nvidia-smi must work)"

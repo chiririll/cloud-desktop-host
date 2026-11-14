@@ -1,5 +1,5 @@
 # Push a tag like v0.1.0 → builds the CT bundle and attaches it to a GitHub release.
-# One matrix job per Fedora release builds its fcNN binary + bundle; a final job (only if all builds
+# One matrix job per distro release builds its binary + bundle (tag fc43, ubuntu2604…); a final job (only if all builds
 # succeeded) writes the single MANIFEST + SHA256SUMS and creates the release — no partial releases.
 # Asset names carry no version, so .../releases/latest/download/<name> always works.
 name: release
@@ -18,33 +18,39 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        fedora: ["43", "44", "45"]   # keep in sync with SUPPORTED_FEDORA in pve/install-parts/10-config.sh
+        # keep in sync with SUPPORTED_DISTROS in pve/install-parts/10-config.sh and SUPPORTED_TAGS in pve/install-parts/ct/10-ct-config.sh
+        include:
+          - { tag: fc43, base: "fedora:43" }
+          - { tag: fc44, base: "fedora:44" }
+          - { tag: fc45, base: "fedora:45" }
+          - { tag: ubuntu2604, base: "ubuntu:26.04" }
     env:
-      FEDORA: ${{ matrix.fedora }}
+      TAG: ${{ matrix.tag }}
+      BASE: ${{ matrix.base }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check pve/install.sh is built from pve/install-parts
+      - name: Check pve/install.sh and pve/ct-install.sh are built from pve/install-parts
         run: pve/build.sh --check
 
       - name: Fetch wlroots submodule only
         run: git submodule update --init --depth 1 subprojects/wlroots
 
-      - name: Build binary (Fedora ${{ env.FEDORA }}, static wlroots)
-        run: docker build --build-arg FEDORA=$FEDORA -o dist .
+      - name: Build binary (${{ env.BASE }}, static wlroots)
+        run: docker build --build-arg BASE=$BASE -o dist .
 
       - name: Package
         run: |
           mkdir -p pkg/cdh/pve dist
           cp dist/cloud-desktop-host pkg/cdh/
           cp -r scripts configs pkg/cdh/
-          cp pve/install.sh pve/host-persist.sh pkg/cdh/pve/
-          tar -C pkg -czf dist/cdh-fc$FEDORA-x86_64.tar.gz cdh
-          mv dist/cloud-desktop-host dist/cloud-desktop-host-fc$FEDORA-x86_64
+          cp pve/install.sh pve/ct-install.sh pve/host-persist.sh pkg/cdh/pve/
+          tar -C pkg -czf dist/cdh-$TAG-x86_64.tar.gz cdh
+          mv dist/cloud-desktop-host dist/cloud-desktop-host-$TAG-x86_64
 
       - uses: actions/upload-artifact@v4
         with:
-          name: build-fc${{ matrix.fedora }}
+          name: build-${{ matrix.tag }}
           path: dist/*
           if-no-files-found: error
 
@@ -61,17 +67,19 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: build-fc*
+          pattern: build-*
           merge-multiple: true
 
       - name: Checksums
         run: |
-          # MANIFEST (used by `install.sh --check`): one binary line per Fedora, plus the scripts/configs
-          # shared by all of them. install.sh picks its own cloud-desktop-host-fcNN-x86_64 line.
-          { (cd dist && sha256sum cloud-desktop-host-fc*-x86_64)
+          # MANIFEST (used by `ct-install.sh --check`): one binary line per distro, plus the scripts/configs
+          # shared by all of them. ct-install.sh picks its own cloud-desktop-host-<tag>-x86_64 line.
+          # ct-install.sh itself is a release asset too: install.sh pushes it into the CT when it is not run from a checkout.
+          cp pve/ct-install.sh dist/ct-install.sh
+          { (cd dist && sha256sum cloud-desktop-host-*-x86_64)
             sha256sum $(find scripts configs -type f | sort)
           } > dist/MANIFEST
-          (cd dist && sha256sum cdh-fc*-x86_64.tar.gz cloud-desktop-host-fc*-x86_64 MANIFEST > SHA256SUMS && cat SHA256SUMS)
+          (cd dist && sha256sum cdh-*-x86_64.tar.gz cloud-desktop-host-*-x86_64 ct-install.sh MANIFEST > SHA256SUMS && cat SHA256SUMS)
 
       - name: Create release
         if: startsWith(github.ref, 'refs/tags/')

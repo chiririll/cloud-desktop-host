@@ -7,6 +7,7 @@ SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 # shellcheck source=lib.sh
 . "$SCRIPT_DIR/lib.sh"
 cdh_env
+stream_active_set
 mkdir -p "$CDH_LOG_DIR"
 exec >>"$CDH_LOG_DIR/prep-gamescope.log" 2>&1
 printf '=== %(%F %T)T ===\n' -1

@@ -41,6 +41,7 @@ if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && [ "${CDH_FORCE:-0}" != 1 ]; then
 fi
 _DBUS_ORIG="${DBUS_SESSION_BUS_ADDRESS:-}"   # before cdh_env adds its fallback
 cdh_env
+stream_active_clear   # a restarted session has no client
 [ -x "$HOST_BIN" ] || die "$HOST_BIN not found. Build: ninja -C build"
 [ -d "$XDG_RUNTIME_DIR" ] || die "XDG_RUNTIME_DIR does not exist"
 
@@ -111,7 +112,9 @@ log "   PipeWire=$PW_PID Pulse=$PP_PID"
 
 # ── 3. kactivitymanagerd ───────────────────────────────────────
 log "3. kactivitymanagerd"
-spawn kactivity env QT_QPA_PLATFORM=offscreen /usr/libexec/kactivitymanagerd
+if KACTIVITY_BIN=$(find_libexec kactivitymanagerd); then
+    spawn kactivity env QT_QPA_PLATFORM=offscreen "$KACTIVITY_BIN"
+fi
 
 # ── 4. Compositor ──────────────────────────────────────────────
 log "4. cloud-desktop-host"

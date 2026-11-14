@@ -136,15 +136,17 @@ legacy_input_cts() {
   echo "${out[*]}"
 }
 
-# 60-lxc-virtual-input.rules (53-phase-inside.sh) hands every virtual device on the
-# host to one uid. Only CTs on the shared /dev/input need it.
-chk_no_inrule() { [[ ! -e $INPUT_RULE ]] || why "$INPUT_RULE still gives every virtual input device to one uid"; }
-do_no_inrule()  { rm -f "$INPUT_RULE"; udevadm control --reload; }
-phase_shared_input_rule() {
-  local others; others=$(legacy_input_cts)
+# What ct-install.sh does about 60-lxc-virtual-input.rules (it hands every virtual device on the host to
+# one uid; only CTs on the shared /dev/input need it): 0 = install it, 1 = this CT has its own /dev/input,
+# remove it, keep = other CTs still share /dev/input, leave it alone.
+input_isolation_mode() {
+  local others
+  if ! input_isolated; then echo 0; return; fi
+  others=$(legacy_input_cts)
   if [[ -n $others ]]; then
-    msg_warn "still on the host's shared /dev/input: CT $others. Re-run install.sh for each: until then they can read CT $CTID's input devices"
+    msg_warn "still on the host's shared /dev/input: CT $others. Re-run install.sh for each: until then they can read CT $CTID's input devices" >&2
+    echo keep
   else
-    step "shared udev rule ${INPUT_RULE##*/} removed" chk_no_inrule do_no_inrule
+    echo 1
   fi
 }

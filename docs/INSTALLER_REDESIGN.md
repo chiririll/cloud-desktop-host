@@ -1,6 +1,6 @@
 # Installer redesign: host/container split, Ubuntu support, update mode
 
-Status: **design, not implemented**. Written 2026-11-14.
+Status: **implemented** (see [CT_INSTALLER.md](CT_INSTALLER.md) and [PVE_INSTALLER.md](PVE_INSTALLER.md)); written as a design on 2026-11-14. Deviations: `CDH_INPUT_ISOLATED` also accepts `keep`; the host still creates `CT_USER` early (the input guard needs its uid); `SUNSHINE_RPM`/`CLOUD_MOUSE_RPM` stay as aliases; the stream-active marker is a state file; Not yet run on a real CT: the whole Ubuntu path and the update mode.
 
 This document describes three related changes to the installer in `pve/`:
 
@@ -56,7 +56,8 @@ pve/
     ├── 60-main.sh           # host main
     ├── ct/                  # in-container parts
     │   ├── 10-ct-config.sh  # env contract (§2.4), os-release detection
-    │   ├── 20-pkg.sh        # package backend: dnf / apt (§3.3)
+    │   ├── 20-distro.sh     # distro detection + dispatch to distro/<id>.sh (dnf / apt)
+    │   ├── distro/          # fedora.sh, ubuntu.sh: one backend per distro
     │   ├── 30-phase-system.sh   # udev db, input rule, packages, NVIDIA userspace, linger
     │   ├── 40-phase-cdh.sh      # binary, scripts/configs, Sunshine, config, Cloud Mouse, Steam
     │   ├── 50-phase-services.sh # user service
@@ -163,7 +164,7 @@ So **24.04 is out** unless these are built from source, and Plasma 6 (the script
 
 ### 3.3 Package backend
 
-`ct/20-pkg.sh` sources `/etc/os-release` and sets `DISTRO=fedora|ubuntu`, `DISTRO_VERSION` (e.g. `43`, `26.04`), and defines:
+`ct/20-distro.sh` sources `/etc/os-release` and sets `DISTRO=fedora|ubuntu`, `DISTRO_VERSION` (e.g. `43`, `26.04`), and defines:
 
 | Function | dnf | apt |
 |----------|-----|-----|
@@ -272,7 +273,7 @@ Inside the container, in this order:
 Each step leaves the repo working; CI (`build.sh --check`, `shell.yml`) runs on each.
 
 1. **Split without behaviour change.** Move `53`/`54` into `install-parts/ct/`, add the `ct*` shims, teach `build.sh` to emit `ct-install.sh`, add `55-phase-run-inside.sh`, define the env contract and exit codes. Still Fedora-only. Test: `install.sh --check` output identical to before on an existing CT.
-2. **Package backend.** Introduce `ct/20-pkg.sh` and replace `dnf`/`rpm` calls in the ct parts with `pkg_*`. Still Fedora-only in practice, but the Ubuntu branch exists.
+2. **Package backend.** Introduce `ct/20-distro.sh` and replace `dnf`/`rpm` calls in the ct parts with `pkg_*`. Still Fedora-only in practice, but the Ubuntu branch exists.
 3. **Ubuntu build.** `Dockerfile` base arg, apt dependency list, matrix entry `ubuntu2604`, asset naming, `DISTRO_TAG` in `30-release.sh`. Fix the two libexec paths in `scripts/`. Verify the wlroots version floors on the real template first (§3.2).
 4. **Ubuntu install path.** Package names, Steam enablement, Sunshine deb selection, Cloud Mouse deb (or warning), `--distro` on the host script, `ubuntu-26.04-standard` template. Test end to end on a fresh CT.
 5. **Update mode.** `ct/60-phase-update.sh`, version checks, `.prev` binary, stream-active marker, session restart, exit code 12, host pass-through, optional timer.

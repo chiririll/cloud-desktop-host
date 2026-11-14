@@ -2,6 +2,8 @@ name: shell
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 jobs:
@@ -13,3 +15,9 @@ jobs:
         run: for f in scripts/*.sh; do bash -n "$f"; done
       - name: shellcheck
         run: shellcheck -x scripts/*.sh
+  installer:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: pve/install.sh and pve/ct-install.sh are built from pve/install-parts
+        run: pve/build.sh --check

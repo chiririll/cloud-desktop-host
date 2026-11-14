@@ -27,14 +27,14 @@ The result is `dist/cloud-desktop-host`, a stripped binary of about 0.5 MB.
 To build for another Fedora release:
 
 ```bash
-docker build --build-arg FEDORA=44 -o dist .
+docker build --build-arg FEDORA=44 -o dist .      # or --build-arg BASE=ubuntu:26.04
 ```
 
 The binary links against the Fedora release it was built on, so build it for the release the container runs. When you upgrade the container's Fedora, rebuild.
 
 ### What the Dockerfile does
 
-1. Starts from `fedora:${FEDORA}` and installs only the build dependencies (meson, gcc, wayland/libinput/mesa/xkbcommon/pixman/systemd `-devel`).
+1. Starts from `${BASE}` (`fedora:${FEDORA}` by default, or e.g. `ubuntu:26.04`) and installs only the build dependencies (meson, gcc, wayland/libinput/mesa/xkbcommon/pixman/systemd `-devel`).
 2. Builds wlroots 0.20.2 from `subprojects/wlroots` as a **static** library, so there is no `libwlroots-0.20.so` to install.
 3. Builds wlroots with **only the headless parts**:
 
@@ -126,11 +126,15 @@ A manual run (**Actions → release → Run workflow**) builds the same files an
 
 ```bash
 base=https://github.com/chiririll/cloud-desktop-host/releases/latest/download
-curl -fLO $base/cdh-fc43-x86_64.tar.gz -fLO $base/SHA256SUMS
+curl -fLO $base/cdh-fc43-x86_64.tar.gz -fLO $base/SHA256SUMS      # or cdh-ubuntu2604-…
 sha256sum -c --ignore-missing SHA256SUMS
 tar -xzf cdh-fc43-x86_64.tar.gz      # → cdh/
 ```
 
-### Supporting another Fedora release
+### Supporting another distro release
 
-Add the number to `strategy.matrix.fedora` in the workflow and to `SUPPORTED_FEDORA` in `pve/install-parts/10-config.sh` (then run `pve/build.sh`). Sunshine publishes RPMs for each release too, so check that its `fc<N>` asset exists first. For a local build: `docker build --build-arg FEDORA=44 -o dist .`
+Add an entry to `strategy.matrix.include` in the workflow, to `SUPPORTED_DISTROS` in `pve/install-parts/10-config.sh` and to `SUPPORTED_TAGS` in `pve/install-parts/ct/10-ct-config.sh` (then run `pve/build.sh`). Sunshine publishes packages per release too, so check that its asset (`fc<N>` rpm, `ubuntu-<N>` deb) exists first. For a local build: `docker build --build-arg FEDORA=44 -o dist .` or `--build-arg BASE=ubuntu:26.04`.
+
+### Release assets per distro
+
+The workflow matrix is a list of `{tag, base}` entries: `fc43`, `fc44`, `fc45`, `ubuntu2604`. Asset names: `cdh-<tag>-x86_64.tar.gz`, `cloud-desktop-host-<tag>-x86_64`; `MANIFEST` has one binary line per tag. `ct-install.sh` is a release asset too (and is inside every bundle under `pve/`); `install.sh` fetches it from there when it is not run from a checkout. The binary links against the distro's sonames, so each distro needs its own build.
