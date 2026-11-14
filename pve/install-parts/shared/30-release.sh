@@ -1,5 +1,6 @@
 # ── release bundle: cdh/{cloud-desktop-host,scripts,configs,pve} ──
-# Shared: the host script fetches ct-install.sh from the release, ct-install.sh fetches the bundle.
+# Shared: the host script downloads the bundle (which contains ct-install.sh) and pushes it into the CT;
+# ct-install.sh downloads it itself when run standalone.
 # MANIFEST: "sha256  path" for cloud-desktop-host, scripts/*, configs/*.
 # --check only needs this (a few KB), the bundle is downloaded to apply.
 release_base() {
@@ -36,15 +37,4 @@ fetch_release() {
   (cd "$BUNDLE_TMP" && grep " $asset\$" SHA256SUMS | sha256sum -c --quiet -) || return 1
   tar -C "$BUNDLE_TMP" -xzf "$BUNDLE_TMP/$asset"
   REPO=$BUNDLE_TMP/cdh CDH_BIN=$BUNDLE_TMP/cdh/cloud-desktop-host
-}
-
-# fetch_release_file <name> <dest>: one release asset (ct-install.sh), verified against SHA256SUMS
-fetch_release_file() {
-  local base sums want
-  base=$(release_base)
-  sums=$(curl -fsSL "$base/SHA256SUMS") || return 1
-  want=$(awk -v f="$1" '$2 == f {print $1}' <<<"$sums")
-  [[ -n $want ]] || return 1
-  curl -fsSL -o "$2" "$base/$1" || return 1
-  [[ "$(sha256sum <"$2" | cut -d' ' -f1)" == "$want" ]]
 }

@@ -32,8 +32,7 @@
 #   INSTALL_STEAM=1|0   Steam + Gamescope + MangoHud (asked; default yes without a tty)
 #   YES=1   don't ask for confirmation before changing an existing CT
 #   NVIDIA_PCI=0000:01:00.0   pick the GPU if there are several NVIDIA cards
-#   CDH_VERSION=v1.0.0   use this release (default: local dist/, else latest); also pins ct-install.sh to it
-#   CDH_REF=main   branch/tag the in-container script is fetched from when run via curl, use the ref of the install.sh URL
+#   CDH_VERSION=v1.0.0   use this release (default: local dist/, else latest)
 #   CDH_GH_REPO=chiririll/cloud-desktop-host   SUNSHINE_PKG=<url or local .rpm/.deb>   SUNSHINE_VERSION=<tag>
 #   CLOUD_MOUSE_PKG=<url or local .rpm/.deb>   (default: latest kcm-cloud-mouse release for the distro, skipped with a warning if there is none; "none" to skip)
 #   (SUNSHINE_RPM / CLOUD_MOUSE_RPM are accepted as old names)
@@ -196,7 +195,6 @@ CSRF_EXTRA=${CSRF_EXTRA:-}
 
 CDH_GH_REPO=${CDH_GH_REPO:-chiririll/cloud-desktop-host}
 CDH_VERSION=${CDH_VERSION:-}
-CDH_REF=${CDH_REF:-main}   # git ref ct-install.sh is fetched from when this script is run via curl (not a checkout)
 # host kernel module that keeps container input away from the host console
 INSTALL_INPUT_GUARD=${INSTALL_INPUT_GUARD:-1}
 CDH_GUARD_REPO=${CDH_GUARD_REPO:-chiririll/cdh-input-guard}
@@ -210,7 +208,7 @@ SUNSHINE_VERSION=${SUNSHINE_VERSION:-}
 CLOUD_MOUSE_PKG=${CLOUD_MOUSE_PKG:-${CLOUD_MOUSE_RPM:-}}
 INSTALL_UPDATE_TIMER=${INSTALL_UPDATE_TIMER:-0}
 CT_CDH=/opt/cloud-desktop-host   # scripts + configs, root-owned, read-only for the user
-CT_INSTALLER=$REPO/pve/ct-install.sh   # the in-container script: checkout, else the release asset
+CT_INSTALLER=$REPO/pve/ct-install.sh   # the in-container script: the checkout's, else the one inside the release bundle (see prepare_bundle)
 LOG=/var/log/cdh-lxc-install.log
 LOG_CT=/var/log/cdh-ct-install.log   # written by ct-install.sh inside the CT
 
@@ -218,7 +216,8 @@ LOG_CT=/var/log/cdh-ct-install.log   # written by ct-install.sh inside the CT
 CHECK_ONLY=0
 CONF=''          # /etc/pve/lxc/<CTID>.conf
 CT_NAME=''       # hostname of the CT if it already exists, empty = will be created
-BUNDLE_TMP=''    # temp dir for the downloaded ct-install.sh, removed on exit
+BUNDLE_TMP=''    # temp dir of the downloaded release bundle, removed on exit
+DISTRO_TAG=''    # fc43 / ubuntu2604: release asset suffix of the CT's distro, set by prepare_bundle
 UPDATE=0         # --update
 FORCE_RESTART=0  # --force-restart
 OS_TYPE=fedora   # pct --ostype of a new CT
@@ -337,7 +336,8 @@ render_file() {
 
 # ════ install-parts/shared/30-release.sh ════
 # ── release bundle: cdh/{cloud-desktop-host,scripts,configs,pve} ──
-# Shared: the host script fetches ct-install.sh from the release, ct-install.sh fetches the bundle.
+# Shared: the host script downloads the bundle (which contains ct-install.sh) and pushes it into the CT;
+# ct-install.sh downloads it itself when run standalone.
 # MANIFEST: "sha256  path" for cloud-desktop-host, scripts/*, configs/*.
 # --check only needs this (a few KB), the bundle is downloaded to apply.
 release_base() {
@@ -374,17 +374,6 @@ fetch_release() {
   (cd "$BUNDLE_TMP" && grep " $asset\$" SHA256SUMS | sha256sum -c --quiet -) || return 1
   tar -C "$BUNDLE_TMP" -xzf "$BUNDLE_TMP/$asset"
   REPO=$BUNDLE_TMP/cdh CDH_BIN=$BUNDLE_TMP/cdh/cloud-desktop-host
-}
-
-# fetch_release_file <name> <dest>: one release asset (ct-install.sh), verified against SHA256SUMS
-fetch_release_file() {
-  local base sums want
-  base=$(release_base)
-  sums=$(curl -fsSL "$base/SHA256SUMS") || return 1
-  want=$(awk -v f="$1" '$2 == f {print $1}' <<<"$sums")
-  [[ -n $want ]] || return 1
-  curl -fsSL -o "$2" "$base/$1" || return 1
-  [[ "$(sha256sum <"$2" | cut -d' ' -f1)" == "$want" ]]
 }
 
 # ════ install-parts/20-helpers.sh ════
@@ -434,6 +423,16 @@ is_supported_distro() {
   local v
   for v in "${SUPPORTED_DISTROS[@]}"; do [[ $v == "$1" ]] && return 0; done
   return 1
+}
+
+# fedora-43 → fc43, ubuntu-26.04 → ubuntu2604: the suffix of the release assets
+distro_tag() {
+  local v
+  case $1 in
+    fedora-*) echo "fc${1#fedora-}" ;;
+    ubuntu-*) v=${1#ubuntu-}; echo "ubuntu${v//./}" ;;
+    *) return 1 ;;
+  esac
 }
 
 # ── 3. container ───────────────────────────────────────────────
@@ -962,25 +961,26 @@ phase_container() {
 # ── phase: run ct-install.sh inside the container ──────────────
 # Everything inside the CT (udev db, packages, NVIDIA userspace, CDH, Sunshine, Steam, the user
 # service, and in --update mode the upgrades) is pve/ct-install.sh. It is pushed in instead of
-# fetched there: a fresh CT has no curl. Contract (env vars, exit codes): see its header.
+# fetched there. Contract (env vars, exit codes): see its header.
 CT_TMP=/tmp/cdh-ct
 
-# a local build (checkout with dist/) replaces the release download inside the CT
-local_build() { [[ -z $CDH_VERSION && -x $CDH_BIN && -d $REPO/scripts ]]; }
-
-# CT_INSTALLER: the checkout's copy; else the same ref install.sh itself comes from (CDH_REF, default main),
-# so the two halves never differ; with CDH_VERSION pinned, that release's asset (verified against SHA256SUMS)
-find_ct_installer() {
-  [[ -f $CT_INSTALLER ]] && return 0
-  BUNDLE_TMP=$(mktemp -d /tmp/cdh-release.XXXXXX)
-  CT_INSTALLER=$BUNDLE_TMP/ct-install.sh
-  if [[ -n $CDH_VERSION && $CDH_VERSION != latest ]]; then
-    fetch_release_file ct-install.sh "$CT_INSTALLER" \
-      || die "could not download/verify ct-install.sh of release $CDH_VERSION from $CDH_GH_REPO"
-  else
-    curl -fsSL -o "$CT_INSTALLER" "https://raw.githubusercontent.com/$CDH_GH_REPO/$CDH_REF/pve/ct-install.sh" \
-      || die "could not download pve/ct-install.sh from $CDH_GH_REPO@$CDH_REF; run from a checkout or set CDH_REF/CDH_VERSION"
+# The bundle (binary, scripts, configs) and ct-install.sh are fetched HERE, never inside the CT: a fresh CT
+# has no curl, and one verified archive guarantees that installer and payload are the same version.
+#   - checkout with dist/ (and no CDH_VERSION): the local build and the checkout's pve/ct-install.sh
+#   - otherwise: the release bundle of the CT's distro (CDH_VERSION or latest), pve/ct-install.sh from inside it
+# Either way REPO/CDH_BIN/CT_INSTALLER end up pointing at it and it is pushed into the CT.
+prepare_bundle() {
+  if [[ -z $CDH_VERSION && -x $CDH_BIN && -d $REPO/scripts ]]; then
+    msg_ok "Using local build" "$CDH_BIN"
+    [[ -f $CT_INSTALLER ]] || die "$CT_INSTALLER is missing"
+    return 0
   fi
+  DISTRO_TAG=$(distro_tag "$DISTRO")
+  msg_info "Downloading release ${CDH_VERSION:-latest} ($DISTRO_TAG) from $CDH_GH_REPO"
+  fetch_release || die "could not download/verify cdh-$DISTRO_TAG-x86_64.tar.gz from $CDH_GH_REPO (${CDH_VERSION:-latest})"
+  CT_INSTALLER=$REPO/pve/ct-install.sh
+  [[ -f $CT_INSTALLER ]] || die "the release bundle has no pve/ct-install.sh"
+  msg_ok "Release ${CDH_VERSION:-latest} downloaded" "sha256 ok"
 }
 
 # push_pkg <VAR>: when $VAR is a local file on the host, push it into the CT and point VAR at the copy
@@ -1000,23 +1000,21 @@ restart_ct() {
 
 phase_run_inside() {
   local out rc=0 n flags=() vars
-  find_ct_installer
+  prepare_bundle
   ct mkdir -p "$CT_TMP"
   pct push "$CTID" "$CT_INSTALLER" "$CT_TMP/ct-install.sh" --perms 0755
   push_pkg SUNSHINE_PKG
   push_pkg CLOUD_MOUSE_PKG
-  if local_build; then
-    ct mkdir -p "$CT_TMP/bundle"
-    tar -C "$REPO" -c scripts configs | pct exec "$CTID" -- tar -C "$CT_TMP/bundle" -x
-    pct push "$CTID" "$CDH_BIN" "$CT_TMP/bundle/cloud-desktop-host" --perms 0755
-  fi
+  ct mkdir -p "$CT_TMP/bundle"
+  tar -C "$REPO" -c scripts configs | pct exec "$CTID" -- tar -C "$CT_TMP/bundle" -x
+  pct push "$CTID" "$CDH_BIN" "$CT_TMP/bundle/cloud-desktop-host" --perms 0755
 
   vars=(CT_USER="$CT_USER" INSTALL_STEAM="$INSTALL_STEAM" CT_CDH="$CT_CDH"
     CDH_INPUT_ISOLATED="$(input_isolation_mode)"
     CDH_GH_REPO="$CDH_GH_REPO" CDH_VERSION="$CDH_VERSION" CSRF_EXTRA="$CSRF_EXTRA"
     SUNSHINE_PKG="$SUNSHINE_PKG" SUNSHINE_VERSION="$SUNSHINE_VERSION" CLOUD_MOUSE_PKG="$CLOUD_MOUSE_PKG"
-    INSTALL_UPDATE_TIMER="$INSTALL_UPDATE_TIMER" CDH_COLOR="$([[ -t 1 ]] && echo 1 || echo 0)")
-  if local_build; then vars+=(CDH_LOCAL_BUNDLE="$CT_TMP/bundle"); fi
+    INSTALL_UPDATE_TIMER="$INSTALL_UPDATE_TIMER" CDH_COLOR="$([[ -t 1 ]] && echo 1 || echo 0)"
+    CDH_LOCAL_BUNDLE="$CT_TMP/bundle")
   if ((CHECK_ONLY)); then flags+=(--check); fi
   if ((UPDATE)); then flags+=(--update); fi
   if ((FORCE_RESTART)); then flags+=(--force-restart); fi

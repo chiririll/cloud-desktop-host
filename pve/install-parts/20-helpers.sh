@@ -46,6 +46,16 @@ is_supported_distro() {
   return 1
 }
 
+# fedora-43 → fc43, ubuntu-26.04 → ubuntu2604: the suffix of the release assets
+distro_tag() {
+  local v
+  case $1 in
+    fedora-*) echo "fc${1#fedora-}" ;;
+    ubuntu-*) v=${1#ubuntu-}; echo "ubuntu${v//./}" ;;
+    *) return 1 ;;
+  esac
+}
+
 # ── 3. container ───────────────────────────────────────────────
 ct()      { pct exec "$CTID" -- "$@"; }
 ct_sh()   { pct exec "$CTID" -- bash -c "$1"; }

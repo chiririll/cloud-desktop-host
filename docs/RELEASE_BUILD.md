@@ -137,4 +137,4 @@ Add an entry to `strategy.matrix.include` in the workflow, to `SUPPORTED_DISTROS
 
 ### Release assets per distro
 
-The workflow matrix is a list of `{tag, base}` entries: `fc43`, `fc44`, `fc45`, `ubuntu2604`. Asset names: `cdh-<tag>-x86_64.tar.gz`, `cloud-desktop-host-<tag>-x86_64`; `MANIFEST` has one binary line per tag. `ct-install.sh` is a release asset too (and is inside every bundle under `pve/`); `install.sh` fetches it from there only when `CDH_VERSION` is pinned; otherwise it takes `pve/ct-install.sh` from the same git ref as itself. The binary links against the distro's sonames, so each distro needs its own build.
+The workflow matrix is a list of `{tag, base}` entries: `fc43`, `fc44`, `fc45`, `ubuntu2604`. Asset names: `cdh-<tag>-x86_64.tar.gz`, `cloud-desktop-host-<tag>-x86_64`; `MANIFEST` has one binary line per tag. `ct-install.sh` is a release asset too (and is inside every bundle under `pve/`); `install.sh` takes it from the bundle it downloads; the standalone asset is for running `ct-install.sh` without Proxmox and for the update timer. The binary links against the distro's sonames, so each distro needs its own build.

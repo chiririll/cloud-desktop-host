@@ -74,7 +74,7 @@ jobs:
         run: |
           # MANIFEST (used by `ct-install.sh --check`): one binary line per distro, plus the scripts/configs
           # shared by all of them. ct-install.sh picks its own cloud-desktop-host-<tag>-x86_64 line.
-          # ct-install.sh itself is a release asset too: install.sh pushes it into the CT when CDH_VERSION is pinned (else it takes the one from its own git ref).
+          # ct-install.sh itself is a release asset too: a standalone asset for running it without Proxmox and for the update timer; install.sh uses the copy inside the bundle.
           cp pve/ct-install.sh dist/ct-install.sh
           { (cd dist && sha256sum cloud-desktop-host-*-x86_64)
             sha256sum $(find scripts configs -type f | sort)

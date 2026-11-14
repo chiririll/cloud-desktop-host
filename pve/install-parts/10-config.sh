@@ -21,7 +21,6 @@ CSRF_EXTRA=${CSRF_EXTRA:-}
 
 CDH_GH_REPO=${CDH_GH_REPO:-chiririll/cloud-desktop-host}
 CDH_VERSION=${CDH_VERSION:-}
-CDH_REF=${CDH_REF:-main}   # git ref ct-install.sh is fetched from when this script is run via curl (not a checkout)
 # host kernel module that keeps container input away from the host console
 INSTALL_INPUT_GUARD=${INSTALL_INPUT_GUARD:-1}
 CDH_GUARD_REPO=${CDH_GUARD_REPO:-chiririll/cdh-input-guard}
@@ -35,7 +34,7 @@ SUNSHINE_VERSION=${SUNSHINE_VERSION:-}
 CLOUD_MOUSE_PKG=${CLOUD_MOUSE_PKG:-${CLOUD_MOUSE_RPM:-}}
 INSTALL_UPDATE_TIMER=${INSTALL_UPDATE_TIMER:-0}
 CT_CDH=/opt/cloud-desktop-host   # scripts + configs, root-owned, read-only for the user
-CT_INSTALLER=$REPO/pve/ct-install.sh   # the in-container script: checkout, else the release asset
+CT_INSTALLER=$REPO/pve/ct-install.sh   # the in-container script: the checkout's, else the one inside the release bundle (see prepare_bundle)
 LOG=/var/log/cdh-lxc-install.log
 LOG_CT=/var/log/cdh-ct-install.log   # written by ct-install.sh inside the CT
 
@@ -43,7 +42,8 @@ LOG_CT=/var/log/cdh-ct-install.log   # written by ct-install.sh inside the CT
 CHECK_ONLY=0
 CONF=''          # /etc/pve/lxc/<CTID>.conf
 CT_NAME=''       # hostname of the CT if it already exists, empty = will be created
-BUNDLE_TMP=''    # temp dir for the downloaded ct-install.sh, removed on exit
+BUNDLE_TMP=''    # temp dir of the downloaded release bundle, removed on exit
+DISTRO_TAG=''    # fc43 / ubuntu2604: release asset suffix of the CT's distro, set by prepare_bundle
 UPDATE=0         # --update
 FORCE_RESTART=0  # --force-restart
 OS_TYPE=fedora   # pct --ostype of a new CT

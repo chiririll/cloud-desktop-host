@@ -1,25 +1,26 @@
 # ── phase: run ct-install.sh inside the container ──────────────
 # Everything inside the CT (udev db, packages, NVIDIA userspace, CDH, Sunshine, Steam, the user
 # service, and in --update mode the upgrades) is pve/ct-install.sh. It is pushed in instead of
-# fetched there: a fresh CT has no curl. Contract (env vars, exit codes): see its header.
+# fetched there. Contract (env vars, exit codes): see its header.
 CT_TMP=/tmp/cdh-ct
 
-# a local build (checkout with dist/) replaces the release download inside the CT
-local_build() { [[ -z $CDH_VERSION && -x $CDH_BIN && -d $REPO/scripts ]]; }
-
-# CT_INSTALLER: the checkout's copy; else the same ref install.sh itself comes from (CDH_REF, default main),
-# so the two halves never differ; with CDH_VERSION pinned, that release's asset (verified against SHA256SUMS)
-find_ct_installer() {
-  [[ -f $CT_INSTALLER ]] && return 0
-  BUNDLE_TMP=$(mktemp -d /tmp/cdh-release.XXXXXX)
-  CT_INSTALLER=$BUNDLE_TMP/ct-install.sh
-  if [[ -n $CDH_VERSION && $CDH_VERSION != latest ]]; then
-    fetch_release_file ct-install.sh "$CT_INSTALLER" \
-      || die "could not download/verify ct-install.sh of release $CDH_VERSION from $CDH_GH_REPO"
-  else
-    curl -fsSL -o "$CT_INSTALLER" "https://raw.githubusercontent.com/$CDH_GH_REPO/$CDH_REF/pve/ct-install.sh" \
-      || die "could not download pve/ct-install.sh from $CDH_GH_REPO@$CDH_REF; run from a checkout or set CDH_REF/CDH_VERSION"
+# The bundle (binary, scripts, configs) and ct-install.sh are fetched HERE, never inside the CT: a fresh CT
+# has no curl, and one verified archive guarantees that installer and payload are the same version.
+#   - checkout with dist/ (and no CDH_VERSION): the local build and the checkout's pve/ct-install.sh
+#   - otherwise: the release bundle of the CT's distro (CDH_VERSION or latest), pve/ct-install.sh from inside it
+# Either way REPO/CDH_BIN/CT_INSTALLER end up pointing at it and it is pushed into the CT.
+prepare_bundle() {
+  if [[ -z $CDH_VERSION && -x $CDH_BIN && -d $REPO/scripts ]]; then
+    msg_ok "Using local build" "$CDH_BIN"
+    [[ -f $CT_INSTALLER ]] || die "$CT_INSTALLER is missing"
+    return 0
   fi
+  DISTRO_TAG=$(distro_tag "$DISTRO")
+  msg_info "Downloading release ${CDH_VERSION:-latest} ($DISTRO_TAG) from $CDH_GH_REPO"
+  fetch_release || die "could not download/verify cdh-$DISTRO_TAG-x86_64.tar.gz from $CDH_GH_REPO (${CDH_VERSION:-latest})"
+  CT_INSTALLER=$REPO/pve/ct-install.sh
+  [[ -f $CT_INSTALLER ]] || die "the release bundle has no pve/ct-install.sh"
+  msg_ok "Release ${CDH_VERSION:-latest} downloaded" "sha256 ok"
 }
 
 # push_pkg <VAR>: when $VAR is a local file on the host, push it into the CT and point VAR at the copy
@@ -39,23 +40,21 @@ restart_ct() {
 
 phase_run_inside() {
   local out rc=0 n flags=() vars
-  find_ct_installer
+  prepare_bundle
   ct mkdir -p "$CT_TMP"
   pct push "$CTID" "$CT_INSTALLER" "$CT_TMP/ct-install.sh" --perms 0755
   push_pkg SUNSHINE_PKG
   push_pkg CLOUD_MOUSE_PKG
-  if local_build; then
-    ct mkdir -p "$CT_TMP/bundle"
-    tar -C "$REPO" -c scripts configs | pct exec "$CTID" -- tar -C "$CT_TMP/bundle" -x
-    pct push "$CTID" "$CDH_BIN" "$CT_TMP/bundle/cloud-desktop-host" --perms 0755
-  fi
+  ct mkdir -p "$CT_TMP/bundle"
+  tar -C "$REPO" -c scripts configs | pct exec "$CTID" -- tar -C "$CT_TMP/bundle" -x
+  pct push "$CTID" "$CDH_BIN" "$CT_TMP/bundle/cloud-desktop-host" --perms 0755
 
   vars=(CT_USER="$CT_USER" INSTALL_STEAM="$INSTALL_STEAM" CT_CDH="$CT_CDH"
     CDH_INPUT_ISOLATED="$(input_isolation_mode)"
     CDH_GH_REPO="$CDH_GH_REPO" CDH_VERSION="$CDH_VERSION" CSRF_EXTRA="$CSRF_EXTRA"
     SUNSHINE_PKG="$SUNSHINE_PKG" SUNSHINE_VERSION="$SUNSHINE_VERSION" CLOUD_MOUSE_PKG="$CLOUD_MOUSE_PKG"
-    INSTALL_UPDATE_TIMER="$INSTALL_UPDATE_TIMER" CDH_COLOR="$([[ -t 1 ]] && echo 1 || echo 0)")
-  if local_build; then vars+=(CDH_LOCAL_BUNDLE="$CT_TMP/bundle"); fi
+    INSTALL_UPDATE_TIMER="$INSTALL_UPDATE_TIMER" CDH_COLOR="$([[ -t 1 ]] && echo 1 || echo 0)"
+    CDH_LOCAL_BUNDLE="$CT_TMP/bundle")
   if ((CHECK_ONLY)); then flags+=(--check); fi
   if ((UPDATE)); then flags+=(--update); fi
   if ((FORCE_RESTART)); then flags+=(--force-restart); fi

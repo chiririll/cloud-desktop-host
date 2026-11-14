@@ -75,11 +75,11 @@ At the end the script prints the CT's IP, how to start the stack, and the Sunshi
 
 | Situation | Source |
 |---|---|
-| Run via `curl`, or from a checkout without `dist/` | latest GitHub release `cdh-<tag>-x86_64.tar.gz` (tag `fc43`, `ubuntu2604`…), downloaded **inside the CT** by `ct-install.sh` and verified against `SHA256SUMS` |
+| Run via `curl`, or from a checkout without `dist/` | latest GitHub release `cdh-<tag>-x86_64.tar.gz` (tag `fc43`, `ubuntu2604`…) of the CT's distro, downloaded and verified against `SHA256SUMS` **on the host** by `install.sh`, then pushed into the CT (`CDH_LOCAL_BUNDLE`) |
 | `CDH_VERSION=v1.0.0` | that release |
 | Run from a checkout that has `dist/cloud-desktop-host` | the local build plus the checkout's `scripts/` and `configs/`, pushed into the CT (`CDH_LOCAL_BUNDLE`). Build it for the CT's distro |
 
-`ct-install.sh` itself comes from the checkout, else from the same git ref as `install.sh` (`CDH_REF`, default `main`; so a `curl` one-liner of `main` never mixes versions). With `CDH_VERSION` pinned it comes from that release instead (verified against `SHA256SUMS`).
+`ct-install.sh` is taken from the same place: from the downloaded bundle (`pve/ct-install.sh` inside it), or from the checkout for a local build. So installer, binary, scripts and configs are always one version, and the CT needs no network access to GitHub for the CDH part. Run standalone (without `install.sh`), `ct-install.sh` downloads the bundle itself.
 
 How releases are built: [RELEASE_BUILD.md](RELEASE_BUILD.md).
 
