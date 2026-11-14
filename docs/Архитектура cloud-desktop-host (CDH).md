@@ -356,8 +356,10 @@ Headless backend wlroots **не создаёт** устройства ввода
 
 | Режим | Условие | Поведение |
 |-------|---------|-----------|
-| **FREE** | `has_active_constraint == false` | Абсолютные координаты → `pointer_notify_motion`; клиппинг по границам output |
-| **LOCKED** | `has_active_constraint == true` | **Только** относительные движения → `relative_pointer_send`; абсолютная позиция не обновляется |
+| **FREE** | `has_active_constraint == false` | Относительное устройство → `pointer_notify_motion` (с клиппингом по границам output) и `relative_motion` |
+| **LOCKED** | `has_active_constraint == true` | Относительное устройство → только `relative_motion` (`zwp_relative_pointer_v1`) |
+
+Абсолютное устройство в обоих режимах всегда пересылается как абсолютное движение (`pointer_notify_motion`). Вложенный Wayland-бэкенд KWin не отбрасывает абсолютное движение при активной блокировке, поэтому конвертация в дельты не нужна (она приводила к рассинхронизации позиций CDH и KWin). Это поведение KWin, а не гарантия протокола `zwp_pointer_constraints_v1`.
 
 В **LOCKED** режиме KWin использует `zwp_relative_pointer_v1` для управления FPS-курсором внутри игры.
 

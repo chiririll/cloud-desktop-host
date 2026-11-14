@@ -124,44 +124,18 @@ static void handle_pointer_motion_abs(struct cd_server *server,
     double y = libinput_event_pointer_get_absolute_y_transformed(pe, server->cur_height);
     uint32_t time = libinput_event_pointer_get_time(pe);
 
-    double dx = x - server->cursor_x;
-    double dy = y - server->cursor_y;
-
-    /* KWin tracks the locked cursor itself, from an unknown start position.
-     * Once per lock, pin it to (0,0) with an oversized negative delta (KWin
-     * clamps to the screen) so that our deltas and KWin's position agree. */
-    if (server->has_active_constraint && !server->abs_synced && server->relative_pointer_mgr) {
-        uint64_t t_usec = (uint64_t)libinput_event_pointer_get_time_usec(pe);
-        double big_x = -2.0 * server->cur_width;
-        double big_y = -2.0 * server->cur_height;
-        wlr_relative_pointer_manager_v1_send_relative_motion(
-            server->relative_pointer_mgr, server->seat,
-            t_usec, big_x, big_y, big_x, big_y);
-        server->cursor_x = 0;
-        server->cursor_y = 0;
-        dx = x;
-        dy = y;
-        server->abs_synced = true;
-    }
-
     server->cursor_x = x;
     server->cursor_y = y;
     clock_gettime(CLOCK_MONOTONIC, &server->last_mouse_activity_time);
 
-    if (!server->has_active_constraint) {
-        struct wlr_surface *focused = server->seat->pointer_state.focused_surface;
-        if (!focused && server->desktop_surface) {
-            wlr_seat_pointer_notify_enter(server->seat, server->desktop_surface, x, y);
-        }
-        wlr_seat_pointer_notify_motion(server->seat, time, x, y);
-    } else if (server->relative_pointer_mgr && (dx != 0.0 || dy != 0.0)) {
-        /* Pointer is locked (auto-lock for cursor rendering): absolute motion
-         * would be dropped, so translate it into relative motion for KWin. */
-        uint64_t time_usec = (uint64_t)libinput_event_pointer_get_time_usec(pe);
-        wlr_relative_pointer_manager_v1_send_relative_motion(
-            server->relative_pointer_mgr, server->seat,
-            time_usec, dx, dy, dx, dy);
+    /* KWin's nested Wayland backend accepts absolute wl_pointer.motion even
+     * while the host pointer lock is active, so no conversion to relative
+     * motion is needed (and no second cursor position can drift). */
+    struct wlr_surface *focused = server->seat->pointer_state.focused_surface;
+    if (!focused && server->desktop_surface) {
+        wlr_seat_pointer_notify_enter(server->seat, server->desktop_surface, x, y);
     }
+    wlr_seat_pointer_notify_motion(server->seat, time, x, y);
 
     wlr_seat_pointer_notify_frame(server->seat);
 
