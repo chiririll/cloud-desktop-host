@@ -5,7 +5,8 @@ do_curl()  { pkg_install curl ca-certificates; }
 # The host's udev database: the container has no udev of its own, libinput/KWin need the host's.
 # In an LXC it is bind-mounted at /mnt/host-udev (lxc.mount.entry, see 52-phase-container.sh) and re-mounted
 # on /run/udev through fstab; on a VM /run/udev is populated by its own udev and nothing is needed.
-UDEV_FSTAB_LINE='/mnt/host-udev  /run/udev  none  bind,ro  0 0'
+UDEV_FSTAB_LINE='/mnt/host-udev  /run/udev  none  bind  0 0'   # no ro: the source is already ro (lxc.mount.entry) and a ro remount is EPERM in an unprivileged CT
+UDEV_FSTAB_OLD='/mnt/host-udev  /run/udev  none  bind,ro  0 0'
 chk_udevdb() {
   ls /run/udev/data 2>/dev/null | grep -q . || { why "/run/udev/data is empty: the host's udev database is not mounted"; return; }
   if [[ -d /mnt/host-udev ]]; then grep -qxF "$UDEV_FSTAB_LINE" /etc/fstab || why "/etc/fstab has no bind mount of /mnt/host-udev"; fi
@@ -15,8 +16,10 @@ do_udevdb() {
     echo "no /mnt/host-udev: bind-mount the host's /run/udev (read-only) there, or at /run/udev"
     return 1
   fi
+  sed -i "\|^$UDEV_FSTAB_OLD\$|d" /etc/fstab   # older versions wrote bind,ro
   grep -qxF "$UDEV_FSTAB_LINE" /etc/fstab || echo "$UDEV_FSTAB_LINE" >>/etc/fstab
   if mountpoint -q /run/udev && ls /run/udev/data >/dev/null 2>&1; then return 0; fi
+  mkdir -p /run/udev   # absent when no udev runs in the CT (Ubuntu); /run is tmpfs
   mount /run/udev
 }
 
