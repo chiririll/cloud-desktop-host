@@ -148,6 +148,7 @@ cloud-desktop-host/
 | [docs/RELEASE_BUILD.md](docs/RELEASE_BUILD.md) | Готовый бинарник: сборка в Docker, релизы через GitHub Actions (EN) |
 | [docs/PVE_INSTALLER.md](docs/PVE_INSTALLER.md) | `pve/install.sh`: установка на Proxmox одной командой, идемпотентно; `pve/host-persist.sh` — настройки хоста на случай перезагрузки (EN) |
 | [docs/SUBPROJECTS.md](docs/SUBPROJECTS.md) | Git submodules: wlroots, Gamescope, Sunshine — версии и управление |
+| [docs/INSTALLER_REDESIGN.md](docs/INSTALLER_REDESIGN.md) | Дизайн (не реализовано): разделение установщика на host/CT-скрипт, поддержка Ubuntu, режим `--update` (EN) |
 
 ---
 
