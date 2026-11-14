@@ -7,13 +7,19 @@ CT_TMP=/tmp/cdh-ct
 # a local build (checkout with dist/) replaces the release download inside the CT
 local_build() { [[ -z $CDH_VERSION && -x $CDH_BIN && -d $REPO/scripts ]]; }
 
-# CT_INSTALLER: the checkout's copy, else the release asset (verified against SHA256SUMS)
+# CT_INSTALLER: the checkout's copy; else the same ref install.sh itself comes from (CDH_REF, default main),
+# so the two halves never differ; with CDH_VERSION pinned, that release's asset (verified against SHA256SUMS)
 find_ct_installer() {
   [[ -f $CT_INSTALLER ]] && return 0
   BUNDLE_TMP=$(mktemp -d /tmp/cdh-release.XXXXXX)
   CT_INSTALLER=$BUNDLE_TMP/ct-install.sh
-  fetch_release_file ct-install.sh "$CT_INSTALLER" \
-    || die "could not download/verify ct-install.sh from $CDH_GH_REPO (${CDH_VERSION:-latest}); run from a checkout or set CDH_VERSION"
+  if [[ -n $CDH_VERSION && $CDH_VERSION != latest ]]; then
+    fetch_release_file ct-install.sh "$CT_INSTALLER" \
+      || die "could not download/verify ct-install.sh of release $CDH_VERSION from $CDH_GH_REPO"
+  else
+    curl -fsSL -o "$CT_INSTALLER" "https://raw.githubusercontent.com/$CDH_GH_REPO/$CDH_REF/pve/ct-install.sh" \
+      || die "could not download pve/ct-install.sh from $CDH_GH_REPO@$CDH_REF; run from a checkout or set CDH_REF/CDH_VERSION"
+  fi
 }
 
 # push_pkg <VAR>: when $VAR is a local file on the host, push it into the CT and point VAR at the copy

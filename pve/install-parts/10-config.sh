@@ -21,6 +21,7 @@ CSRF_EXTRA=${CSRF_EXTRA:-}
 
 CDH_GH_REPO=${CDH_GH_REPO:-chiririll/cloud-desktop-host}
 CDH_VERSION=${CDH_VERSION:-}
+CDH_REF=${CDH_REF:-main}   # git ref ct-install.sh is fetched from when this script is run via curl (not a checkout)
 # host kernel module that keeps container input away from the host console
 INSTALL_INPUT_GUARD=${INSTALL_INPUT_GUARD:-1}
 CDH_GUARD_REPO=${CDH_GUARD_REPO:-chiririll/cdh-input-guard}

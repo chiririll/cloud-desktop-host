@@ -31,7 +31,8 @@
 #   INSTALL_STEAM=1|0   Steam + Gamescope + MangoHud (asked; default yes without a tty)
 #   YES=1   don't ask for confirmation before changing an existing CT
 #   NVIDIA_PCI=0000:01:00.0   pick the GPU if there are several NVIDIA cards
-#   CDH_VERSION=v1.0.0   use this release (default: local dist/, else latest)
+#   CDH_VERSION=v1.0.0   use this release (default: local dist/, else latest); also pins ct-install.sh to it
+#   CDH_REF=main   branch/tag the in-container script is fetched from when run via curl, use the ref of the install.sh URL
 #   CDH_GH_REPO=chiririll/cloud-desktop-host   SUNSHINE_PKG=<url or local .rpm/.deb>   SUNSHINE_VERSION=<tag>
 #   CLOUD_MOUSE_PKG=<url or local .rpm/.deb>   (default: latest kcm-cloud-mouse release for the distro, skipped with a warning if there is none; "none" to skip)
 #   (SUNSHINE_RPM / CLOUD_MOUSE_RPM are accepted as old names)

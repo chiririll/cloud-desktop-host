@@ -79,7 +79,7 @@ At the end the script prints the CT's IP, how to start the stack, and the Sunshi
 | `CDH_VERSION=v1.0.0` | that release |
 | Run from a checkout that has `dist/cloud-desktop-host` | the local build plus the checkout's `scripts/` and `configs/`, pushed into the CT (`CDH_LOCAL_BUNDLE`). Build it for the CT's distro |
 
-`ct-install.sh` itself comes from the checkout, else from the release (verified against `SHA256SUMS`).
+`ct-install.sh` itself comes from the checkout, else from the same git ref as `install.sh` (`CDH_REF`, default `main`; so a `curl` one-liner of `main` never mixes versions). With `CDH_VERSION` pinned it comes from that release instead (verified against `SHA256SUMS`).
 
 How releases are built: [RELEASE_BUILD.md](RELEASE_BUILD.md).
 
