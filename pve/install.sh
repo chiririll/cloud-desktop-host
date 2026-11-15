@@ -186,7 +186,7 @@ YES=${YES:-0}
 TEMPLATE_STORAGE=${TEMPLATE_STORAGE:-local}
 DISTRO=${DISTRO:-${FEDORA:+fedora-$FEDORA}}
 SUPPORTED_DISTROS=(fedora-43 fedora-44 fedora-45 ubuntu-26.04)   # keep in sync with the matrix in .github/workflows/release.yml
-DEFAULT_DISTRO=fedora-43
+DEFAULT_DISTRO=fedora-44
 CT_USER=${CT_USER:-user}
 INSTALL_STEAM=${INSTALL_STEAM:-}
 SHM_SIZE=${SHM_SIZE:-4G}
@@ -402,6 +402,9 @@ ask() {
   printf -v "$var" '%s' "$ans"
 }
 
+# join_by <sep> <items…>
+join_by() { local sep=$1 out=$2; shift 2; for x; do out+=$sep$x; done; printf %s "$out"; }
+
 # confirm "question" [y|n, default n]: returns 0 for yes (always yes with YES=1 or no tty)
 confirm() {
   local ans def=${2:-n} hint=y/N
@@ -569,6 +572,27 @@ resolve_ct_network() {
   [[ $CT_GATEWAY =~ ^$IPV4_RE$ ]] || die "static CT_IP needs CT_GATEWAY=a.b.c.d, got '${CT_GATEWAY:-}'"
 }
 
+# Two-step choice of DISTRO: first the distro family, then its version (skipped when there is only one).
+ask_distro() {
+  local d f fam='' ver='' families=() versions=() def_fam=${DEFAULT_DISTRO%%-*} def_ver
+  for d in "${SUPPORTED_DISTROS[@]}"; do
+    f=${d%%-*}
+    [[ " ${families[*]} " == *" $f "* ]] || families+=("$f")
+  done
+  ask fam "Distro ($(join_by ' / ' "${families[@]}"))" "$def_fam" "^($(join_by '|' "${families[@]}"))\$"
+  for d in "${SUPPORTED_DISTROS[@]}"; do
+    [[ ${d%%-*} == "$fam" ]] && versions+=("${d#*-}")
+  done
+  if ((${#versions[@]} == 1)); then
+    DISTRO=$fam-${versions[0]}
+    return 0
+  fi
+  def_ver=${versions[0]}
+  [[ $fam == "$def_fam" ]] && def_ver=${DEFAULT_DISTRO#*-}
+  ask ver "$fam version ($(join_by ' / ' "${versions[@]}"))" "$def_ver" "^($(join_by '|' "${versions[@]}" | sed 's/\./\\./g'))\$"
+  DISTRO=$fam-$ver
+}
+
 # DISTRO = fedora-NN | ubuntu-NN.NN. An existing running CT decides for itself.
 resolve_distro() {
   local ct_distro
@@ -581,7 +605,7 @@ resolve_distro() {
   fi
   if [[ -z $DISTRO ]]; then
     if [[ -z $CT_NAME ]] && ((!CHECK_ONLY)); then
-      ask DISTRO "Distro (${SUPPORTED_DISTROS[*]})" "$DEFAULT_DISTRO" '^[a-z]+-[0-9.]+$'
+      ask_distro
     else
       DISTRO=$DEFAULT_DISTRO
     fi

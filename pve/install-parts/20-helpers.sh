@@ -23,6 +23,9 @@ ask() {
   printf -v "$var" '%s' "$ans"
 }
 
+# join_by <sep> <items…>
+join_by() { local sep=$1 out=$2; shift 2; for x; do out+=$sep$x; done; printf %s "$out"; }
+
 # confirm "question" [y|n, default n]: returns 0 for yes (always yes with YES=1 or no tty)
 confirm() {
   local ans def=${2:-n} hint=y/N
