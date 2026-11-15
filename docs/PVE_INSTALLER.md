@@ -201,7 +201,10 @@ lxc.mount.entry: /run/udev mnt/host-udev none bind,ro,optional,create=dir  # hos
 lxc.cap.drop:                                                              # reset template drops…
 lxc.cap.drop: mac_admin mac_override sys_module sys_pacct sys_rawio sys_time  # …keep sys_nice, setfcap
 lxc.mount.entry: tmpfs dev/shm tmpfs rw,nosuid,nodev,mode=1777,size=4G,create=dir 0 0
+lxc.mount.auto: proc:rw                                                    # writable /proc/sys, for Flatpak
 ```
+
+`proc:rw` replaces LXC's default `proc:mixed`, which keeps `/proc/sys` read-only. Flatpak's bubblewrap writes `user.max_user_namespaces` of its own user namespace there and otherwise stops with `cannot open /proc/sys/user/max_user_namespaces: Read-only file system`. The CT is unprivileged, so the host's sysctls stay out of reach: they belong to the host's root.
 
 With `INSTALL_INPUT_GUARD=0` the second line is `lxc.mount.entry: /dev/input dev/input none bind,optional,create=dir`: the host's whole `/dev/input`, shared with every other such CT.
 

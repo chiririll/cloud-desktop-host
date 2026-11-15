@@ -6,7 +6,7 @@ Like the host script it is **idempotent** (check → apply → check again) and 
 
 ## Standalone use
 
-The container must already have what only a host can give: `/dev/dri/renderD*`, `/dev/uinput`, `/dev/input/*`, the `/dev/nvidia*` nodes and the host's udev database (bind-mounted at `/mnt/host-udev`, or already at `/run/udev`). Also not done for you: the `sys_nice` cap override for KWin and a big enough `/dev/shm`. The LXC config block in [INSTALL_AND_CONFIG.md](INSTALL_AND_CONFIG.md) is that list.
+The container must already have what only a host can give: `/dev/dri/renderD*`, `/dev/uinput`, `/dev/input/*`, the `/dev/nvidia*` nodes and the host's udev database (bind-mounted at `/mnt/host-udev`, or already at `/run/udev`). Also not done for you: the `sys_nice` cap override for KWin, a big enough `/dev/shm` and, for Flatpak in an unprivileged LXC, a writable `/proc/sys` (`lxc.mount.auto: proc:rw`). The LXC config block in [INSTALL_AND_CONFIG.md](INSTALL_AND_CONFIG.md) is that list.
 
 ```bash
 # as root, prefer a tag over main

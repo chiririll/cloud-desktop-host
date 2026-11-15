@@ -35,6 +35,9 @@ input_mount() {
 }
 
 # raw lxc.* keys, kept in the main section (before any [snapshot])
+# proc:rw: LXC's default proc:mixed leaves /proc/sys read-only, and Flatpak's bwrap (--disable-userns)
+# writes user.max_user_namespaces of its own user namespace there. Only the proc part of lxc.mount.auto
+# changes. Fine in an unprivileged CT (required above): the host's sysctls belong to the host's root.
 raw_lines() {
   cat <<EOF
 lxc.cgroup2.devices.allow: c 13:* rwm
@@ -43,6 +46,7 @@ lxc.mount.entry: /run/udev mnt/host-udev none bind,ro,optional,create=dir
 lxc.cap.drop:
 lxc.cap.drop: mac_admin mac_override sys_module sys_pacct sys_rawio sys_time
 lxc.mount.entry: tmpfs dev/shm tmpfs rw,nosuid,nodev,mode=1777,size=$SHM_SIZE,create=dir 0 0
+lxc.mount.auto: proc:rw
 EOF
 }
 main_conf() { sed -e '/^\[/,$d' -e 's/[[:space:]]*$//' "$CONF"; }   # pve may keep "key: " with a trailing space
@@ -142,7 +146,7 @@ phase_container() {
   # before the CT starts: its config may already mount this directory
   if input_isolated; then step "input directory $INPUT_ROOT/$CTID" chk_input_dir do_input_dir; fi
   step "CT running" chk_running do_running
-  step "lxc.conf: input bind, host udev, caps, /dev/shm" chk_raw do_raw
+  step "lxc.conf: input bind, host udev, caps, /dev/shm, rw /proc/sys" chk_raw do_raw
   restart_if_applied
   if ((CHECK_ONLY)) && ! ct_up; then skip_rest "CT $CTID is not running"; return 0; fi
 
