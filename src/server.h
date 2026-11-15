@@ -24,6 +24,7 @@ extern "C" {
 #include "wlr_cxx_end.h"
 
 #include "dbus_input.h"
+#include "session.h"
 
 #define CD_DEFAULT_WIDTH   1920
 #define CD_DEFAULT_HEIGHT  1080

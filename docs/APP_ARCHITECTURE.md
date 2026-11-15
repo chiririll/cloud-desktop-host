@@ -233,6 +233,22 @@ Sunshine передает в prep-скрипты `SUNSHINE_CLIENT_WIDTH`, `SUNSH
 8. Moonlight получает H.265/H.264 поток.
 ```
 
+**Кнопки «Завершить сеанс» в Plasma.** ksmserver/plasma_session не запускаются, поэтому `org.kde.Shutdown`
+(куда Plasma и `ksmserver-logout-greeter` шлют выход/перезагрузку/выключение) обслуживает CDH: `run.sh` кладёт
+перед Plasma свой D-Bus `.service`, и шина по первому вызову запускает `cloud-desktop-host --kde-shutdown`
+(`src/session.cpp`), который отвечает и запускает `scripts/session-action.sh`. Постоянно держать имя нельзя:
+`ksmserver-logout-greeter` при старте видит владельца `org.kde.Shutdown` и молча выходит.
+
+| Кнопка | Что происходит |
+|--------|----------------|
+| Выйти | завершается `cmd` приложения Desktop (`sunshine-desktop-hold.sh`) → Sunshine закрывает стрим и запускает undo-скрипт |
+| Перезагрузить | `systemctl --user restart cloud-desktop-host.service` — перезапуск всего стека |
+| Выключить | `systemctl poweroff` — выключение контейнера (polkit-правило `50-cdh-power.rules` от `ct-install.sh`) |
+
+«Заблокировать» и «Сменить пользователя» скрыты через `configs/xdg/kdeglobals` (подключается в `XDG_CONFIG_DIRS`
+в `lib.sh`): экрана блокировки (`--no-lockscreen`) и display manager нет. Сон и гибернацию то же polkit-правило
+запрещает, и Plasma их не показывает.
+
 ### 6.2 Steam Deck Mode
 
 ```text

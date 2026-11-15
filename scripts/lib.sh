@@ -6,6 +6,8 @@
 #   cdh_env
 
 # ── Environment ────────────────────────────────────────────────
+_CDH_XDG_DIR="$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")/configs/xdg"
+
 cdh_env() {
     export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$UID}"
     export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
@@ -15,6 +17,11 @@ cdh_env() {
     # xdg-open (Electron, GTK apps…) picks kde-open only when these are set
     export QT_QPA_PLATFORMTHEME=kde XDG_CURRENT_DESKTOP=KDE XDG_SESSION_DESKTOP=KDE
     export KDE_SESSION_VERSION=6 KDE_FULL_SESSION=true
+    # configs/xdg/kdeglobals: hides Lock and Switch User. Prepended once (children call cdh_env again).
+    case ":${XDG_CONFIG_DIRS:-}:" in
+        *":$_CDH_XDG_DIR:"*) ;;
+        *) export XDG_CONFIG_DIRS="$_CDH_XDG_DIR:${XDG_CONFIG_DIRS:-/etc/xdg}" ;;
+    esac
 }
 
 # Plasma client environment (used as: env "${KDE_ENV[@]}" DISPLAY="$d" cmd)
@@ -224,6 +231,7 @@ start_desktop() {
 
     dbus-update-activation-environment \
         "${KDE_ENV[@]}" DISPLAY="$KWIN_XDISPLAY" \
+        XDG_CONFIG_DIRS="$XDG_CONFIG_DIRS" \
         XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
         DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" 2>/dev/null || true
     set_gtk_layout

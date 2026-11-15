@@ -90,6 +90,20 @@ Persistent=true
 WantedBy=timers.target
 CDH_EMBEDDED_EOF
       ;;
+    polkit/50-cdh-power.rules)
+      cat <<'CDH_EMBEDDED_EOF'
+// cloud-desktop-host (ct-install.sh): Plasma's Shut down / Restart for the desktop user.
+// A CDH session has no active logind session, so logind would refuse (or ask for a password nobody sees).
+// Sleep is denied so Plasma hides it: a container cannot suspend.
+polkit.addRule(function(action, subject) {
+    if (subject.user != "@CT_USER@") return polkit.Result.NOT_HANDLED;
+    var id = action.id.replace(/^org\.freedesktop\.login1\./, "").replace(/-multiple-sessions$/, "");
+    if (id == "power-off" || id == "reboot") return polkit.Result.YES;
+    if (id == "suspend" || id == "hibernate") return polkit.Result.NO;
+    return polkit.Result.NOT_HANDLED;
+});
+CDH_EMBEDDED_EOF
+      ;;
     *) echo "get_file: no file $1" >&2; return 1 ;;
   esac
 }
@@ -619,6 +633,12 @@ do_nvuser() {
 
 chk_smi() { nvidia-smi -L; }
 
+# Plasma's Shut down → systemctl poweroff (scripts/session-action.sh) needs logind's consent without a session
+POWER_RULE=/etc/polkit-1/rules.d/50-cdh-power.rules
+power_rule_txt() { render_file polkit/50-cdh-power.rules CT_USER; }
+chk_powerrule() { [[ "$(cat "$POWER_RULE" 2>/dev/null)" == "$(power_rule_txt)" ]] || why "$POWER_RULE missing or outdated"; }
+do_powerrule()  { mkdir -p "${POWER_RULE%/*}"; power_rule_txt >"$POWER_RULE"; chmod 0644 "$POWER_RULE"; }
+
 chk_linger() { [[ -e "/var/lib/systemd/linger/$CT_USER" ]]; }
 do_linger()  { loginctl enable-linger "$CT_USER"; }
 
@@ -631,6 +651,7 @@ phase_system() {
   step "NVIDIA userspace $(host_driver || echo '?') (matches host)" chk_nvuser do_nvuser
   require "nvidia-smi works in the container" chk_smi "check the /dev/nvidia* nodes and the driver version, see $LOG"
   step "linger for '$CT_USER'" chk_linger do_linger
+  step "polkit: '$CT_USER' may power off the container from Plasma" chk_powerrule do_powerrule
 }
 
 # ════ install-parts/ct/40-phase-cdh.sh ════
@@ -736,6 +757,31 @@ do_ssconf() {
   as_user "cp $CT_CDH/configs/sunshine/$apps ~/.config/sunshine/apps.json"
 }
 
+# The Desktop app's "cmd" placeholder lets Plasma's Log out end the stream (scripts/session-action.sh).
+# An apps.json exactly as an older release shipped it is replaced; an edited one only gets a warning.
+SSAPPS_STOCK=(08b76836a49c48c1596022ad8fb5bc62a3b8cc977aeb766e8a701fcd633f5416:apps.json
+              de733821dc993c3ca78aacf33923bdfcaadc254644095b7bb8218654e84e3a55:apps-desktop.json)
+ssapps_stock() {   # prints the shipped file an unedited older apps.json corresponds to
+  local sum e
+  sum=$(as_user 'sha256sum < ~/.config/sunshine/apps.json' | cut -d' ' -f1)
+  for e in "${SSAPPS_STOCK[@]}"; do
+    if [[ $sum == "${e%%:*}" ]]; then echo "${e#*:}"; return 0; fi
+  done
+  return 1
+}
+ssapps_has_hold() {   # no apps.json yet counts as done: the config step writes the current one
+  as_user 'test ! -s ~/.config/sunshine/apps.json || grep -q sunshine-desktop-hold.sh ~/.config/sunshine/apps.json'
+}
+chk_ssapps() {
+  ssapps_has_hold && return 0
+  ssapps_stock >/dev/null || return 0   # edited by hand: see phase_cdh
+  why "apps.json predates the Desktop app placeholder"
+}
+do_ssapps() {
+  local f; f=$(ssapps_stock) || return 1
+  as_user "cp $CT_CDH/configs/sunshine/$f ~/.config/sunshine/apps.json"
+}
+
 # ── KCM Cloud Mouse ──
 # Default: the release asset of this distro. Not built for every release: skip with a warning instead of failing.
 CLOUD_MOUSE_REPO=chiririll/kcm-cloud-mouse
@@ -789,6 +835,10 @@ phase_cdh() {
   step "Sunshine" chk_sunshine do_sunshine
   step "Sunshine has no file caps (AT_SECURE breaks ENet)" "chk_nocaps sunshine" "do_nocaps sunshine"
   step "Sunshine config (kept if it already exists)" chk_ssconf do_ssconf
+  step "Sunshine Desktop app: Plasma's Log out ends the stream" chk_ssapps do_ssapps
+  if id "$CT_USER" >/dev/null 2>&1 && ! ssapps_has_hold && ! ssapps_stock >/dev/null; then
+    msg_warn "Sunshine apps.json of '$CT_USER' was edited, left alone: for Plasma's Log out to end the stream, give the Desktop app \"cmd\": \"$CT_CDH/scripts/sunshine-desktop-hold.sh\""
+  fi
   phase_cloudmouse
   phase_steam
 }

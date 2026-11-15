@@ -78,6 +78,12 @@ do_nvuser() {
 
 chk_smi() { nvidia-smi -L; }
 
+# Plasma's Shut down → systemctl poweroff (scripts/session-action.sh) needs logind's consent without a session
+POWER_RULE=/etc/polkit-1/rules.d/50-cdh-power.rules
+power_rule_txt() { render_file polkit/50-cdh-power.rules CT_USER; }
+chk_powerrule() { [[ "$(cat "$POWER_RULE" 2>/dev/null)" == "$(power_rule_txt)" ]] || why "$POWER_RULE missing or outdated"; }
+do_powerrule()  { mkdir -p "${POWER_RULE%/*}"; power_rule_txt >"$POWER_RULE"; chmod 0644 "$POWER_RULE"; }
+
 chk_linger() { [[ -e "/var/lib/systemd/linger/$CT_USER" ]]; }
 do_linger()  { loginctl enable-linger "$CT_USER"; }
 
@@ -90,4 +96,5 @@ phase_system() {
   step "NVIDIA userspace $(host_driver || echo '?') (matches host)" chk_nvuser do_nvuser
   require "nvidia-smi works in the container" chk_smi "check the /dev/nvidia* nodes and the driver version, see $LOG"
   step "linger for '$CT_USER'" chk_linger do_linger
+  step "polkit: '$CT_USER' may power off the container from Plasma" chk_powerrule do_powerrule
 }

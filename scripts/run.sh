@@ -8,6 +8,7 @@
 #   --steam   standalone Steam GamepadUI on a fullscreen Xwayland, no KWin
 #   hud, debug  shorthands for --hud / --debug
 # Env: CDH_BIN (compositor binary), CDH_FORCE=1 (allow running inside a graphical session)
+# Plasma's Log out / Restart / Shut down: see session-action.sh
 # Logs: /tmp/cdhost-logs/<timestamp>/ (newest 5 kept), /tmp/cdhost-logs/latest
 # ────────────────────────────────────────────────────────────────
 
@@ -93,10 +94,19 @@ rm -f "$XDG_RUNTIME_DIR"/wayland-* "$XDG_RUNTIME_DIR"/pipewire-* "$XDG_RUNTIME_D
 
 # ── 1. D-Bus ───────────────────────────────────────────────────
 log "1. D-Bus session"
+# Plasma's Log out / Restart / Shut down call org.kde.Shutdown. It must stay unowned until called
+# (ksmserver-logout-greeter quits when it has an owner), so it is D-Bus activated: this .service, in front
+# of Plasma's plasma-shutdown, starts "cloud-desktop-host --kde-shutdown session-action.sh" for the call.
+DBUS_DATA="$CDH_STATE_DIR/dbus-data"
+mkdir -p "$DBUS_DATA/dbus-1/services"
+printf '[D-BUS Service]\nName=org.kde.Shutdown\nExec=%s --kde-shutdown %s\n' \
+    "$(readlink -f "$HOST_BIN")" "$SCRIPT_DIR/session-action.sh" >"$DBUS_DATA/dbus-1/services/org.kde.Shutdown.service"
 if [ -z "$_DBUS_ORIG" ]; then
-    eval "$(dbus-launch --sh-syntax)"
+    eval "$(XDG_DATA_DIRS="$DBUS_DATA:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" dbus-launch --sh-syntax)"
     export DBUS_SESSION_BUS_ADDRESS
     DBUS_LAUNCHED=1
+else
+    log "   ⚠️  existing session bus: Plasma's Log out / Restart / Shut down are not handled by CDH"
 fi
 log "   ✅ $DBUS_SESSION_BUS_ADDRESS"
 

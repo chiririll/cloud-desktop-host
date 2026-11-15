@@ -100,6 +100,31 @@ do_ssconf() {
   as_user "cp $CT_CDH/configs/sunshine/$apps ~/.config/sunshine/apps.json"
 }
 
+# The Desktop app's "cmd" placeholder lets Plasma's Log out end the stream (scripts/session-action.sh).
+# An apps.json exactly as an older release shipped it is replaced; an edited one only gets a warning.
+SSAPPS_STOCK=(08b76836a49c48c1596022ad8fb5bc62a3b8cc977aeb766e8a701fcd633f5416:apps.json
+              de733821dc993c3ca78aacf33923bdfcaadc254644095b7bb8218654e84e3a55:apps-desktop.json)
+ssapps_stock() {   # prints the shipped file an unedited older apps.json corresponds to
+  local sum e
+  sum=$(as_user 'sha256sum < ~/.config/sunshine/apps.json' | cut -d' ' -f1)
+  for e in "${SSAPPS_STOCK[@]}"; do
+    if [[ $sum == "${e%%:*}" ]]; then echo "${e#*:}"; return 0; fi
+  done
+  return 1
+}
+ssapps_has_hold() {   # no apps.json yet counts as done: the config step writes the current one
+  as_user 'test ! -s ~/.config/sunshine/apps.json || grep -q sunshine-desktop-hold.sh ~/.config/sunshine/apps.json'
+}
+chk_ssapps() {
+  ssapps_has_hold && return 0
+  ssapps_stock >/dev/null || return 0   # edited by hand: see phase_cdh
+  why "apps.json predates the Desktop app placeholder"
+}
+do_ssapps() {
+  local f; f=$(ssapps_stock) || return 1
+  as_user "cp $CT_CDH/configs/sunshine/$f ~/.config/sunshine/apps.json"
+}
+
 # ── KCM Cloud Mouse ──
 # Default: the release asset of this distro. Not built for every release: skip with a warning instead of failing.
 CLOUD_MOUSE_REPO=chiririll/kcm-cloud-mouse
@@ -153,6 +178,10 @@ phase_cdh() {
   step "Sunshine" chk_sunshine do_sunshine
   step "Sunshine has no file caps (AT_SECURE breaks ENet)" "chk_nocaps sunshine" "do_nocaps sunshine"
   step "Sunshine config (kept if it already exists)" chk_ssconf do_ssconf
+  step "Sunshine Desktop app: Plasma's Log out ends the stream" chk_ssapps do_ssapps
+  if id "$CT_USER" >/dev/null 2>&1 && ! ssapps_has_hold && ! ssapps_stock >/dev/null; then
+    msg_warn "Sunshine apps.json of '$CT_USER' was edited, left alone: for Plasma's Log out to end the stream, give the Desktop app \"cmd\": \"$CT_CDH/scripts/sunshine-desktop-hold.sh\""
+  fi
   phase_cloudmouse
   phase_steam
 }

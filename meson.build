@@ -31,6 +31,7 @@ executable('cloud-desktop-host',
   'src/xdg.cpp',
   'src/input.cpp',
   'src/dbus_input.cpp',
+  'src/session.cpp',
   'src/debug_ui.cpp',
   dependencies: [
     wlroots_dep,

@@ -23,7 +23,7 @@ HOST_PARTS=(install-parts/00-header.sh install-parts/10-config.sh install-parts/
 HOST_FILES=(bin/cdh-input-node.sh udev/72-cdh-input-node.rules)
 
 CT_PARTS=(install-parts/ct/00-header.sh install-parts/ct/10-ct-config.sh install-parts/shared/*.sh install-parts/ct/distro/*.sh install-parts/ct/[2-9]*.sh)
-CT_FILES=(udev/60-lxc-virtual-input.rules systemd/cloud-desktop-host.service systemd/cdh-update.service systemd/cdh-update.timer)
+CT_FILES=(udev/60-lxc-virtual-input.rules systemd/cloud-desktop-host.service systemd/cdh-update.service systemd/cdh-update.timer polkit/50-cdh-power.rules)
 
 # get_file <dir/name>: prints install-parts/files/<dir/name>
 render_embedded() {

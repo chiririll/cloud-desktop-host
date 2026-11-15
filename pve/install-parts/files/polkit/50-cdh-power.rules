@@ -1,0 +1,10 @@
+// cloud-desktop-host (ct-install.sh): Plasma's Shut down / Restart for the desktop user.
+// A CDH session has no active logind session, so logind would refuse (or ask for a password nobody sees).
+// Sleep is denied so Plasma hides it: a container cannot suspend.
+polkit.addRule(function(action, subject) {
+    if (subject.user != "@CT_USER@") return polkit.Result.NOT_HANDLED;
+    var id = action.id.replace(/^org\.freedesktop\.login1\./, "").replace(/-multiple-sessions$/, "");
+    if (id == "power-off" || id == "reboot") return polkit.Result.YES;
+    if (id == "suspend" || id == "hibernate") return polkit.Result.NO;
+    return polkit.Result.NOT_HANDLED;
+});

@@ -40,6 +40,10 @@ int main(int argc, char *argv[]) {
     /* 0. Сначала инициализируем логи (пока на уровне INFO) */
     wlr_log_init(WLR_INFO, nullptr);
 
+    /* D-Bus activated org.kde.Shutdown helper (see session.cpp, run.sh), not the compositor */
+    if (argc >= 2 && std::string(argv[1]) == "--kde-shutdown")
+        return cd_kde_shutdown_main(argc >= 3 ? argv[2] : nullptr);
+
     struct cd_server server = {};
     server.debug        = false;
     server.hud          = false;

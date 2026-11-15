@@ -1,0 +1,7 @@
+# cloud-desktop-host: read through XDG_CONFIG_DIRS (scripts/lib.sh), ~/.config/kdeglobals still wins.
+# KWin runs with --no-lockscreen and there is no display manager: Lock and Switch User could only do nothing.
+# Log out / Restart / Shut down stay: the compositor answers them (org.kde.Shutdown, scripts/session-action.sh).
+[KDE Action Restrictions]
+action/lock_screen=false
+action/switch_user=false
+action/start_new_session=false

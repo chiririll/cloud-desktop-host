@@ -4,6 +4,7 @@
     {
       "name": "Desktop",
       "image-path": "",
+      "cmd": "/opt/cloud-desktop-host/scripts/sunshine-desktop-hold.sh",
       "prep-cmd": [
         {
           "do": "/opt/cloud-desktop-host/scripts/sunshine-prep-desktop.sh",
