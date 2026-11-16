@@ -1,11 +1,12 @@
 #!/bin/bash
-# session-action.sh — what Plasma's Log out / Restart / Shut down do in a CDH session.
+# session-action.sh — what Plasma's Log out / Restart / Shut down and Steam's Suspend do in a CDH session.
 # Run by "cloud-desktop-host --kde-shutdown", which the session bus starts for org.kde.Shutdown calls
-# (src/session.cpp; the .service file is written by run.sh).
+# (src/session.cpp; the .service file is written by run.sh), and for suspend by dbus-send-shim.sh.
 #
-# Usage: session-action.sh logout|reboot|shutdown
+# Usage: session-action.sh logout|suspend|reboot|shutdown
 #   logout    end the Moonlight stream: the Desktop app's placeholder (sunshine-desktop-hold.sh) exits,
 #             Sunshine closes the stream and runs sunshine-undo-desktop.sh
+#   suspend   same as logout: a container cannot sleep, a stopped session is what burns no CPU/GPU
 #   reboot    restart the whole CDH stack (cloud-desktop-host.service); the client reconnects
 #   shutdown  power off the container (polkit rule from ct-install.sh: 50-cdh-power.rules)
 
@@ -25,13 +26,17 @@ end_stream() {
         log "Desktop app placeholder stopped: Sunshine ends the stream"
         return 0
     fi
-    # Sunshine apps.json without the placeholder cmd (edited by hand), or no stream at all
-    log "no Desktop app placeholder running: stopping the desktop, a connected client stays on an empty screen"
-    "$SCRIPT_DIR/sunshine-undo-desktop.sh"
+    # Steam Deck Mode (its Sunshine app has no placeholder), an apps.json edited by hand, or no stream at all
+    log "no Desktop app placeholder running: stopping the session, a connected client stays on an empty screen"
+    if pgrep -u "$UID" -x gamescope >/dev/null; then
+        "$SCRIPT_DIR/sunshine-undo-gamescope.sh"
+    else
+        "$SCRIPT_DIR/sunshine-undo-desktop.sh"
+    fi
 }
 
 case "${1:-}" in
-    logout)
+    logout | suspend)
         end_stream
         ;;
     reboot)
@@ -49,6 +54,6 @@ case "${1:-}" in
             || log "poweroff refused: is /etc/polkit-1/rules.d/50-cdh-power.rules installed (ct-install.sh)?"
         ;;
     *)
-        die "usage: ${0##*/} logout|reboot|shutdown"
+        die "usage: ${0##*/} logout|suspend|reboot|shutdown"
         ;;
 esac

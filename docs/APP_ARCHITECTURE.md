@@ -249,6 +249,16 @@ Sunshine передает в prep-скрипты `SUNSHINE_CLIENT_WIDTH`, `SUNSH
 в `lib.sh`): экрана блокировки (`--no-lockscreen`) и display manager нет. Сон и гибернацию то же polkit-правило
 запрещает, и Plasma их не показывает.
 
+**«Спящий режим» в Steam.** Steam (Big Picture и Deck UI) показывает пункт всегда и по нажатию запускает
+`steam-runtime-launch-client --alongside-steam -- dbus-send --system … org.freedesktop.login1.Manager.Suspend boolean:true`
+с тем `PATH`, с которым был запущен сам. logind в контейнере отвечает «sleep verb not supported» ещё до polkit,
+так что на системной стороне перехватить вызов нечем. Поэтому `cdh_env` (`lib.sh`) ставит первым в `PATH` каталог
+`$XDG_RUNTIME_DIR/cdh/bin` со ссылкой `dbus-send` → `scripts/dbus-send-shim.sh`: запросы сна к logind
+(`Suspend`, `Hibernate`, `HybridSleep`, `SuspendThenHibernate`, `Sleep`) уходят в `session-action.sh suspend`,
+все остальные вызовы — в настоящий `dbus-send`. Контейнер уснуть не может, поэтому `suspend` делает то же, что
+«Выйти»: останавливает сеанс. В Steam Deck Mode у приложения Sunshine нет `cmd`-заглушки, и стрим закрыть нечем:
+Gamescope и Steam останавливаются, клиент остаётся на пустом экране до выхода в Moonlight.
+
 ### 6.2 Steam Deck Mode
 
 ```text

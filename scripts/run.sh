@@ -8,7 +8,7 @@
 #   --steam   standalone Steam GamepadUI on a fullscreen Xwayland, no KWin
 #   hud, debug  shorthands for --hud / --debug
 # Env: CDH_BIN (compositor binary), CDH_FORCE=1 (allow running inside a graphical session)
-# Plasma's Log out / Restart / Shut down: see session-action.sh
+# Plasma's Log out / Restart / Shut down and Steam's Suspend: see session-action.sh
 # Logs: /tmp/cdhost-logs/<timestamp>/ (newest 5 kept), /tmp/cdhost-logs/latest
 # ────────────────────────────────────────────────────────────────
 

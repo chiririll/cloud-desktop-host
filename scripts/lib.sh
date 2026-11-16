@@ -6,7 +6,8 @@
 #   cdh_env
 
 # ── Environment ────────────────────────────────────────────────
-_CDH_XDG_DIR="$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")/configs/xdg"
+_CDH_SCRIPTS_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+_CDH_XDG_DIR="$(dirname "$_CDH_SCRIPTS_DIR")/configs/xdg"
 
 cdh_env() {
     export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$UID}"
@@ -21,6 +22,14 @@ cdh_env() {
     case ":${XDG_CONFIG_DIRS:-}:" in
         *":$_CDH_XDG_DIR:"*) ;;
         *) export XDG_CONFIG_DIRS="$_CDH_XDG_DIR:${XDG_CONFIG_DIRS:-/etc/xdg}" ;;
+    esac
+    # Steam's Suspend runs "dbus-send … login1.Manager.Suspend", which logind refuses in a container:
+    # dbus-send-shim.sh, first in PATH under that name, hands it to session-action.sh suspend.
+    mkdir -p "$CDH_STATE_DIR/bin"
+    ln -sfn "$_CDH_SCRIPTS_DIR/dbus-send-shim.sh" "$CDH_STATE_DIR/bin/dbus-send"
+    case ":$PATH:" in
+        *":$CDH_STATE_DIR/bin:"*) ;;
+        *) export PATH="$CDH_STATE_DIR/bin:$PATH" ;;
     esac
 }
 
@@ -231,7 +240,7 @@ start_desktop() {
 
     dbus-update-activation-environment \
         "${KDE_ENV[@]}" DISPLAY="$KWIN_XDISPLAY" \
-        XDG_CONFIG_DIRS="$XDG_CONFIG_DIRS" \
+        XDG_CONFIG_DIRS="$XDG_CONFIG_DIRS" PATH="$PATH" \
         XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
         DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" 2>/dev/null || true
     set_gtk_layout
